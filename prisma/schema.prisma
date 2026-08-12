@@ -1,0 +1,206 @@
+// Prisma schema for the Hearth backend.
+//
+// This is a 1:1 port of my-home/app/db/schema.ts (Drizzle). Table names,
+// column names, types, defaults, and constraints are preserved exactly via
+// @@map/@map — model and field names are just renamed to Prisma/TS
+// convention (PascalCase models, camelCase fields). No data model redesign.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// auth domain: households, users, invites, email_verifications
+// ---------------------------------------------------------------------------
+
+model Household {
+  id          String   @id @default(uuid()) @db.Uuid
+  memberOrder String[] @default([]) @map("member_order") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  users   User[]
+  invites Invite[]
+
+  @@map("households")
+}
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  householdId     String    @map("household_id") @db.Uuid
+  email           String    @unique
+  passwordHash    String    @map("password_hash")
+  name            String
+  role            String
+  avatarKey       String    @map("avatar_key")
+  // Null until the /activate link is clicked. Login is refused until then.
+  emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  household          Household           @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  choreCompletions   ChoreCompletion[]
+  sentInvites        Invite[]
+  emailVerifications EmailVerification[]
+
+  @@map("users")
+}
+
+model Invite {
+  id              String    @id @default(uuid()) @db.Uuid
+  householdId     String    @map("household_id") @db.Uuid
+  invitedByUserId String    @map("invited_by_user_id") @db.Uuid
+  email           String
+  token           String    @unique
+  expiresAt       DateTime  @map("expires_at") @db.Timestamptz(6)
+  acceptedAt      DateTime? @map("accepted_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  invitedBy User      @relation(fields: [invitedByUserId], references: [id], onDelete: Cascade)
+
+  @@map("invites")
+}
+
+model EmailVerification {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  token      String    @unique
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_verifications")
+}
+
+// ---------------------------------------------------------------------------
+// shopping domain: shopping_lists, shopping_items
+// ---------------------------------------------------------------------------
+
+model ShoppingList {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  items ShoppingItem[]
+
+  @@map("shopping_lists")
+}
+
+model ShoppingItem {
+  id             String   @id @default(uuid()) @db.Uuid
+  listId         String   @map("list_id") @db.Uuid
+  name           String
+  quantity       Decimal  @db.Decimal
+  unit           String
+  checked        Boolean  @default(false)
+  sourceRecipeId String?  @map("source_recipe_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  list         ShoppingList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  sourceRecipe Recipe?      @relation(fields: [sourceRecipeId], references: [id], onDelete: SetNull)
+
+  @@map("shopping_items")
+}
+
+// ---------------------------------------------------------------------------
+// recipes domain: recipes, recipe_ingredients
+// ---------------------------------------------------------------------------
+
+model Recipe {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  servings     Int
+  instructions String
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  ingredients  RecipeIngredient[]
+  sourcedItems ShoppingItem[]
+
+  @@map("recipes")
+}
+
+model RecipeIngredient {
+  id        String   @id @default(uuid()) @db.Uuid
+  recipeId  String   @map("recipe_id") @db.Uuid
+  name      String
+  quantity  Decimal  @db.Decimal
+  unit      String
+  position  Int
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  recipe Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@map("recipe_ingredients")
+}
+
+// ---------------------------------------------------------------------------
+// chores domain: chores, chore_completions
+// ---------------------------------------------------------------------------
+
+enum RotationGroup {
+  A
+  B
+  C
+  D
+
+  @@map("rotation_group")
+}
+
+model Chore {
+  id            String        @id @default(uuid()) @db.Uuid
+  name          String
+  rotationGroup RotationGroup @map("rotation_group")
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime      @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  completions ChoreCompletion[]
+
+  @@map("chores")
+}
+
+model ChoreCompletion {
+  id          String   @id @default(uuid()) @db.Uuid
+  choreId     String   @map("chore_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  isoWeek     String   @map("iso_week")
+  completedAt DateTime @default(now()) @map("completed_at") @db.Timestamptz(6)
+
+  chore Chore @relation(fields: [choreId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([choreId, isoWeek])
+  @@map("chore_completions")
+}
+
+// ---------------------------------------------------------------------------
+// reminders domain: reminders
+// ---------------------------------------------------------------------------
+
+model Reminder {
+  id          String    @id @default(uuid()) @db.Uuid
+  title       String
+  dueAt       DateTime  @map("due_at") @db.Timestamptz(6)
+  doneAt      DateTime? @map("done_at") @db.Timestamptz(6)
+  // Can name either or both users — a household-of-two array, same pattern
+  // as households.member_order. No FK: an array column can't declare one,
+  // so a removed user just leaves a dangling id here (harmless — chip
+  // lookups fall through to "no chip" for an id that no longer resolves).
+  assigneeIds String[]  @default([]) @map("assignee_ids") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("reminders")
+}
