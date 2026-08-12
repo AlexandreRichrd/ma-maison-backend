@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+README.md
+.env
+.env.test
+# Copying this into a fresh build context fools tsc's --incremental check
+# into skipping emit entirely, since it has no matching dist/ to compare
+# against — it's a purely local, ephemeral cache.
+*.tsbuildinfo
