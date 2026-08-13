@@ -414,10 +414,17 @@ Ask before adding a dependency, changing the Prisma schema, or introducing a
 new architectural pattern. Prefer the boring solution that fits the stack
 already here.
 
-**During the incremental migration**: `home_manager` contains tables created
-by Drizzle from the old frontend backend. Prisma shares this database.
-Never run `prisma migrate dev` against it — it compares live schema against
-the migration history, sees Drizzle-created tables it doesn't own, and can
-propose a reset that drops everything. Use `prisma migrate deploy` to apply,
-and `prisma migrate resolve --applied <name>` to baseline an existing schema.
-This restriction lifts once Drizzle is fully removed.
+**Migration history note**: `home_manager`'s tables were originally created
+by Drizzle, from the old frontend backend, not by Prisma. That's still
+physically true and always will be — it's history, not a live risk. The
+`20260812193239_init` migration was baselined onto that existing schema with
+`prisma migrate resolve --applied`, not run for real (its `CREATE TABLE`
+statements would have failed outright against tables that already existed;
+check `git log -- prisma/migrations` if that's ever in doubt). `prisma
+migrate status` confirms the migration history and the live schema agree
+("Database schema is up to date"), and `schema.prisma` has had no changes
+since that baseline. `prisma migrate dev` is safe to use normally for future
+schema changes — re-run `prisma migrate status` first if you have any doubt
+before trusting that. `my-home`'s `app/db/` (Drizzle) still exists, but only
+for local dev seeding (see its `CLAUDE.md`'s Database section) — it doesn't
+touch schema or migrations, so it has no bearing on any of the above.
