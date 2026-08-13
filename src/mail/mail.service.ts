@@ -1,20 +1,32 @@
 import { Injectable } from '@nestjs/common';
 import nodemailer, { type Transporter } from 'nodemailer';
 
-const FROM = process.env.MAIL_FROM ?? 'Hearth <no-reply@hearth.local>';
-
 @Injectable()
 export class MailService {
-  private readonly transporter: Transporter | null = process.env.SMTP_HOST
-    ? nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: Number(process.env.SMTP_PORT ?? 587),
-        secure: Number(process.env.SMTP_PORT) === 465,
-        auth: process.env.SMTP_USER
-          ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-          : undefined,
-      })
-    : null;
+  private readonly transporter: Transporter | null;
+  private readonly from: string;
+
+  constructor() {
+    this.transporter = process.env.SMTP_HOST
+      ? nodemailer.createTransport({
+          host: process.env.SMTP_HOST,
+          port: Number(process.env.SMTP_PORT ?? 587),
+          secure: Number(process.env.SMTP_PORT ?? 587) === 465,
+          auth: process.env.SMTP_USER
+            ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+            : undefined,
+        })
+      : null;
+
+    // The From address is always SMTP_USER, not a separately configurable
+    // value — DMARC checks From against the authenticated sending mailbox,
+    // so letting them drift apart (e.g. a leftover placeholder From while
+    // SMTP_USER points at the real mailbox) is exactly what lands invites
+    // in spam. Tying them together makes that mismatch impossible.
+    this.from = process.env.SMTP_USER
+      ? `"Hearth" <${process.env.SMTP_USER}>`
+      : '"Hearth" <no-reply@hearth.local>';
+  }
 
   // SMTP is optional in development — without it, emails are logged instead
   // of sent, so the invite/activate flow can be exercised locally without
@@ -26,7 +38,7 @@ export class MailService {
       );
       return;
     }
-    await this.transporter.sendMail({ from: FROM, to, subject, text });
+    await this.transporter.sendMail({ from: this.from, to, subject, text });
   }
 
   private appUrl(path: string): string {
