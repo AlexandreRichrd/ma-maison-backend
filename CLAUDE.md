@@ -283,10 +283,14 @@ Household growth is invite-gated, not self-serve:
 
 `MailService`: if `SMTP_HOST` isn't set, it logs the email (with the link) to
 the console instead of sending — that's the local-dev path, and how you find
-invite/activation links when testing without real SMTP. Production needs
-`SMTP_HOST` (+ `SMTP_USER`/`SMTP_PASS` if the relay needs auth) and
-`APP_URL` set, so emailed links point at the frontend's real domain, not this
-API's.
+invite/activation links when testing without real SMTP. Production sends for
+real, through the household's mailbox (`contact@aureus-lab.fr` on OVH's
+Zimbra, port 587/STARTTLS — see `.env.example`), and needs `SMTP_HOST`,
+`SMTP_USER`, `SMTP_PASS`, and `APP_URL` set, so emailed links point at the
+frontend's real domain, not this API's. There is no separate "from address"
+setting — the From header is always built from `SMTP_USER`, since DMARC
+checks From against the authenticated sending mailbox and letting the two
+diverge is how mail lands in spam.
 
 ## Commands
 
