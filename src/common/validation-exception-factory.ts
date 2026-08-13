@@ -15,6 +15,9 @@ const CODE_BY_CONSTRAINT: Record<string, string> = {
   isIso8601: 'invalid_type',
   arrayMaxSize: 'invalid_type',
   isArray: 'invalid_type',
+  isInt: 'invalid_type',
+  min: 'too_small',
+  isEnum: 'invalid_type',
 };
 
 function flatten(errors: ValidationError[]): ApiFieldError[] {
