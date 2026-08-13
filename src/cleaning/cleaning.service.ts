@@ -2,20 +2,11 @@ import { Injectable } from '@nestjs/common';
 
 import { ApiError } from '../common/api-error';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  HouseholdMembersService,
+  type HouseholdMemberDto,
+} from './household-members.service';
 import { RotationService, type UserAssignment } from './rotation.service';
-
-/**
- * The only shape household-roster data is exposed as from this service — no
- * passwordHash, no email. See my-home-backend/CLAUDE.md's Database section:
- * a bare `select()` on `users` let password_hash ride along into SSR
- * payloads before, so this is always an explicit column list.
- */
-export type HouseholdMemberDto = {
-  id: string;
-  name: string;
-  avatarKey: string;
-  role: string;
-};
 
 export type ChoreDto = {
   id: string;
@@ -39,39 +30,14 @@ export class CleaningService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly rotation: RotationService,
+    private readonly householdMembers: HouseholdMembersService,
   ) {}
-
-  /** Users in `households.member_order` order — stable, so rotation never scrambles. */
-  private async getOrderedHouseholdMembers(
-    userId: string,
-  ): Promise<HouseholdMemberDto[]> {
-    const currentUser = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { householdId: true },
-    });
-    if (!currentUser) return [];
-
-    const household = await this.prisma.household.findUnique({
-      where: { id: currentUser.householdId },
-    });
-    if (!household) return [];
-
-    const members = await this.prisma.user.findMany({
-      where: { householdId: household.id },
-      select: { id: true, name: true, avatarKey: true, role: true },
-    });
-    const byId = new Map(members.map((member) => [member.id, member]));
-
-    return household.memberOrder
-      .map((id) => byId.get(id))
-      .filter((member): member is HouseholdMemberDto => member != null);
-  }
 
   private async resolveAssignment(
     userId: string,
     isoWeek: string,
   ): Promise<ResolvedAssignment | null> {
-    const members = await this.getOrderedHouseholdMembers(userId);
+    const members = await this.householdMembers.getOrderedMembers(userId);
     if (members.length < 2) return null;
     const [first, second] = members as [HouseholdMemberDto, HouseholdMemberDto];
 

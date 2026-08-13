@@ -1,6 +1,7 @@
 import { ApiError } from '../common/api-error';
 import { PrismaService } from '../prisma/prisma.service';
 import { CleaningService } from './cleaning.service';
+import { HouseholdMembersService } from './household-members.service';
 import { RotationService } from './rotation.service';
 
 describe('CleaningService', () => {
@@ -17,7 +18,11 @@ describe('CleaningService', () => {
 
   beforeEach(async () => {
     await prisma.$executeRaw`TRUNCATE households, users, chores, chore_completions RESTART IDENTITY CASCADE`;
-    cleaning = new CleaningService(prisma, new RotationService());
+    cleaning = new CleaningService(
+      prisma,
+      new RotationService(),
+      new HouseholdMembersService(prisma),
+    );
   });
 
   async function seedHouseholdOfTwo() {
