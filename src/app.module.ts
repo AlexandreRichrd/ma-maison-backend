@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { CleaningModule } from './cleaning/cleaning.module';
 import { ClimateModule } from './climate/climate.module';
 import { CommonModule } from './common/common.module';
+import { HouseholdsModule } from './households/households.module';
 import { MailModule } from './mail/mail.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RecipesModule } from './recipes/recipes.module';
@@ -21,6 +22,7 @@ import { throttlerConfig } from './throttler.config';
     PrismaModule,
     MailModule,
     AuthModule,
+    HouseholdsModule,
     ShoppingModule,
     CleaningModule,
     RecipesModule,

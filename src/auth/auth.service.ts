@@ -28,7 +28,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function toPublicUser(user: User): PublicUser {
+export function toPublicUser(user: User): PublicUser {
   const publicUser: Partial<User> = { ...user };
   delete publicUser.passwordHash;
   return publicUser as PublicUser;

@@ -81,6 +81,12 @@ describe('Auth (e2e)', () => {
       where: { email: 'newperson@example.com' },
     });
 
+    // The public register page reads this — no Authorization header, and
+    // it must not consume the invite the way registering does.
+    await request(app.getHttpServer())
+      .get(`/invites/${invite.token}`)
+      .expect(200, { email: 'newperson@example.com' });
+
     await request(app.getHttpServer())
       .post('/auth/register')
       .send({
@@ -123,6 +129,51 @@ describe('Auth (e2e)', () => {
     const { user: loggedInUser } = postActivationLogin.body as LoginBody;
     expect(loggedInUser.id).toBe(newUser.id);
     expect(loggedInUser).not.toHaveProperty('passwordHash');
+  });
+
+  it('404s an invite token lookup once the invite has been accepted', async () => {
+    await seedHouseholdWithVerifiedUser('inviter2@example.com', 'inviter-pass');
+    const loginRes = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'inviter2@example.com', password: 'inviter-pass' })
+      .expect(200);
+    const { accessToken } = loginRes.body as LoginBody;
+
+    await request(app.getHttpServer())
+      .post('/invites')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ email: 'accepted@example.com' })
+      .expect(201);
+    const invite = await prisma.invite.findFirstOrThrow({
+      where: { email: 'accepted@example.com' },
+    });
+
+    await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({
+        token: invite.token,
+        name: 'Accepted',
+        role: 'Partenaire',
+        password: 'whatever-pass',
+        confirmPassword: 'whatever-pass',
+      })
+      .expect(201);
+
+    const res = await request(app.getHttpServer())
+      .get(`/invites/${invite.token}`)
+      .expect(404);
+    expect((res.body as ErrorBody).errors).toEqual([
+      { field: 'token', code: 'not_found' },
+    ]);
+  });
+
+  it('404s an unknown invite token lookup', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/invites/nonexistent-token')
+      .expect(404);
+    expect((res.body as ErrorBody).errors).toEqual([
+      { field: 'token', code: 'not_found' },
+    ]);
   });
 
   describe('validation', () => {

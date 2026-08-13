@@ -13,10 +13,9 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { getJwtPrivateKey, getJwtPublicKey } from './jwt-keys';
 import { JwtStrategy } from './jwt.strategy';
 
-// Owns: households, users, invites, email_verifications. CLAUDE.md's module
-// tree splits a households/ module (GET /households/me) and a mail/ module
-// out of this one — mail is its own module already; households stays
-// folded in here until that controller lands.
+// Owns: users, invites, email_verifications, and household *growth*
+// (invites, register append to member_order). Reading the household
+// roster is households/households.module.ts's GET /households/me instead.
 @Module({
   imports: [
     MailModule,

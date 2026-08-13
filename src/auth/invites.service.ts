@@ -37,4 +37,18 @@ export class InvitesService {
 
     return { ok: true };
   }
+
+  /**
+   * For the public register page: which email address is this invite for,
+   * and is the link still usable? Same usability rule as AuthService.register()
+   * (not yet accepted, not expired) — read-only here, doesn't consume it.
+   */
+  async findUsableByToken(token: string): Promise<{ email: string } | null> {
+    const invite = await this.prisma.invite.findUnique({ where: { token } });
+    const usable =
+      invite !== null &&
+      invite.acceptedAt === null &&
+      invite.expiresAt.getTime() > Date.now();
+    return usable ? { email: invite.email } : null;
+  }
 }
