@@ -413,3 +413,11 @@ Do not build these unless explicitly asked:
 Ask before adding a dependency, changing the Prisma schema, or introducing a
 new architectural pattern. Prefer the boring solution that fits the stack
 already here.
+
+**During the incremental migration**: `home_manager` contains tables created
+by Drizzle from the old frontend backend. Prisma shares this database.
+Never run `prisma migrate dev` against it — it compares live schema against
+the migration history, sees Drizzle-created tables it doesn't own, and can
+propose a reset that drops everything. Use `prisma migrate deploy` to apply,
+and `prisma migrate resolve --applied <name>` to baseline an existing schema.
+This restriction lifts once Drizzle is fully removed.
