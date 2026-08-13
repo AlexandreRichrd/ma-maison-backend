@@ -186,6 +186,16 @@ This is the same schema the old Drizzle setup used — port it into
 - Schema changes: edit `schema.prisma`, run `prisma migrate dev`, review the
   generated SQL, commit the migration folder — never hand-edit a migration
   after it's been applied anywhere
+- `password_hash` must never be selected outside the auth service. Any
+  query, controller, or DTO that touches `users` — this service or a future
+  one (`households/me`, an admin listing, whatever) — returns a projected
+  type, never the raw Prisma `User`. `AuthService`'s `PublicUser` (`Omit<User,
+  'passwordHash'>` plus a `toPublicUser()` helper) is the existing pattern;
+  reuse or mirror it, don't invent a new shape per endpoint. This bit
+  `my-home` for real: `getOrderedUsers()` selected full `User` rows and the
+  hash rode along into five different loaders' SSR payloads before anyone
+  noticed — the fix there was the same idea, an explicit column list instead
+  of a bare `select()`
 
 `addIngredientsToList()` (recipe -> shopping list) is the one multi-step
 write that must stay a single Prisma `$transaction`; partial application is
