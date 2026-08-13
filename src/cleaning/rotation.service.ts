@@ -3,61 +3,97 @@ import { differenceInCalendarISOWeeks } from 'date-fns';
 
 import { parseIsoWeek } from './iso-week.util';
 
-/** Reference week zero for the rotation. Arbitrary but fixed — never change. */
-export const ROTATION_EPOCH = '2024-W01';
+export type ChoreAssignmentMode = 'ROTATING' | 'PINNED';
 
 export type RotationUser = { id: string };
 
-export type WeeklyGroup = 'A' | 'B';
-export type BiweeklyGroup = 'C' | 'D';
-
-export type UserAssignment = {
-  userId: string;
-  weeklyGroup: WeeklyGroup;
-  biweeklyGroup: BiweeklyGroup;
+/**
+ * Everything rotation needs to know about one chore. A Prisma `Chore` row
+ * satisfies this structurally, so callers can pass rows straight through
+ * with no mapping step.
+ */
+export type ChoreConfig = {
+  id: string;
+  frequencyWeeks: number;
+  assignmentMode: ChoreAssignmentMode;
+  // The ISO week (YYYY-Www) this chore first occurred — every later
+  // occurrence is derived from this, never a separately stored schedule.
+  anchorIsoWeek: string;
+  // Dual meaning by assignmentMode: for PINNED, the permanent assignee;
+  // for ROTATING, who was assigned on anchorIsoWeek (occurrence 0) — later
+  // occurrences alternate from there.
+  anchorUserId: string;
 };
 
-export type Assignment = [UserAssignment, UserAssignment];
+export type ChoreAssignment = { userId: string };
 
-function mod(n: number, m: number): number {
-  return ((n % m) + m) % m;
+function resolveUsers(
+  chore: ChoreConfig,
+  users: [RotationUser, RotationUser],
+): { anchorUser: RotationUser; otherUser: RotationUser } {
+  const [first, second] = users;
+  if (chore.anchorUserId === first.id) {
+    return { anchorUser: first, otherUser: second };
+  }
+  if (chore.anchorUserId === second.id) {
+    return { anchorUser: second, otherUser: first };
+  }
+  throw new Error(
+    `Chore ${chore.id}'s anchorUserId does not match either household user — this is an invariant ChoresService must enforce on create/update, not a normal input to guard against here.`,
+  );
 }
 
 /**
- * Pure, deterministic chore-group rotation. Same isoWeek + users in, same
- * result out — no database access. Only decides which user gets which
- * rotation group this week; joining that against real chore rows is the
- * caller's job.
+ * Pure, deterministic per-chore rotation. Same isoWeek + chore config +
+ * users in, same result out — no database access. Deciding *whether* and
+ * *to whom* a chore is assigned this week is all this does; joining that
+ * against completions is the caller's job.
  */
 @Injectable()
 export class RotationService {
-  getWeekAssignment(
+  /** null = the chore does not occur on isoWeek under its current config. */
+  getChoreAssignment(
     isoWeek: string,
+    chore: ChoreConfig,
     users: [RotationUser, RotationUser],
-  ): Assignment {
-    const weeksSinceEpoch = differenceInCalendarISOWeeks(
+  ): ChoreAssignment | null {
+    if (!Number.isInteger(chore.frequencyWeeks) || chore.frequencyWeeks < 1) {
+      throw new Error(
+        `Chore ${chore.id} has a non-positive frequencyWeeks (${chore.frequencyWeeks}) — this is an invariant ChoresService must enforce on create/update.`,
+      );
+    }
+
+    const { anchorUser, otherUser } = resolveUsers(chore, users);
+
+    const weeksSinceAnchor = differenceInCalendarISOWeeks(
       parseIsoWeek(isoWeek),
-      parseIsoWeek(ROTATION_EPOCH),
+      parseIsoWeek(chore.anchorIsoWeek),
     );
+    if (weeksSinceAnchor < 0 || weeksSinceAnchor % chore.frequencyWeeks !== 0) {
+      return null;
+    }
 
-    const weeklyParity = mod(weeksSinceEpoch, 2);
-    const biweeklyParity = mod(Math.floor(weeksSinceEpoch / 2), 2);
+    if (chore.assignmentMode === 'PINNED') {
+      return { userId: anchorUser.id };
+    }
 
-    const [first, second] = users;
-    const firstWeekly: WeeklyGroup = weeklyParity === 0 ? 'A' : 'B';
-    const firstBiweekly: BiweeklyGroup = biweeklyParity === 0 ? 'C' : 'D';
+    const occurrenceIndex = weeksSinceAnchor / chore.frequencyWeeks;
+    return {
+      userId: occurrenceIndex % 2 === 0 ? anchorUser.id : otherUser.id,
+    };
+  }
 
-    return [
-      {
-        userId: first.id,
-        weeklyGroup: firstWeekly,
-        biweeklyGroup: firstBiweekly,
-      },
-      {
-        userId: second.id,
-        weeklyGroup: firstWeekly === 'A' ? 'B' : 'A',
-        biweeklyGroup: firstBiweekly === 'C' ? 'D' : 'C',
-      },
-    ];
+  /** Pure filter/map over getChoreAssignment — only the occurring chores. */
+  getWeekOccurrences(
+    isoWeek: string,
+    chores: ChoreConfig[],
+    users: [RotationUser, RotationUser],
+  ): { choreId: string; userId: string }[] {
+    return chores.flatMap((chore) => {
+      const assignment = this.getChoreAssignment(isoWeek, chore, users);
+      return assignment
+        ? [{ choreId: chore.id, userId: assignment.userId }]
+        : [];
+    });
   }
 }

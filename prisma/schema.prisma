@@ -44,6 +44,7 @@ model User {
 
   household          Household           @relation(fields: [householdId], references: [id], onDelete: Cascade)
   choreCompletions   ChoreCompletion[]
+  anchoredChores     Chore[]
   sentInvites        Invite[]
   emailVerifications EmailVerification[]
 
@@ -150,22 +151,36 @@ model RecipeIngredient {
 // chores domain: chores, chore_completions
 // ---------------------------------------------------------------------------
 
-enum RotationGroup {
-  A
-  B
-  C
-  D
+enum AssignmentMode {
+  ROTATING
+  PINNED
 
-  @@map("rotation_group")
+  @@map("assignment_mode")
 }
 
 model Chore {
-  id            String        @id @default(uuid()) @db.Uuid
-  name          String
-  rotationGroup RotationGroup @map("rotation_group")
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime      @default(now()) @map("updated_at") @db.Timestamptz(6)
+  id             String         @id @default(uuid()) @db.Uuid
+  name           String
+  frequencyWeeks Int            @map("frequency_weeks")
+  assignmentMode AssignmentMode @map("assignment_mode")
+  // The ISO week (YYYY-Www) this chore first occurred. Every later
+  // occurrence is derived from this by rotation.service.ts — never a
+  // separately stored schedule.
+  anchorIsoWeek  String         @map("anchor_iso_week")
+  // Dual meaning depending on assignmentMode: for PINNED, the permanent
+  // assignee; for ROTATING, who was assigned on anchorIsoWeek (occurrence
+  // 0) — later occurrences alternate from there. One column instead of two
+  // nullable ones (a chore is never in a state where both or neither
+  // apply, so there's nothing a separate nullable pair would guard that
+  // this doesn't already guarantee).
+  anchorUserId   String         @map("anchor_user_id") @db.Uuid
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
 
+  // Restrict, not Cascade: a chore config is household-level, not the
+  // anchor user's own data — it shouldn't vanish (or drag its completion
+  // history down with it) if a remove-user flow is ever added.
+  anchorUser  User              @relation(fields: [anchorUserId], references: [id], onDelete: Restrict)
   completions ChoreCompletion[]
 
   @@map("chores")

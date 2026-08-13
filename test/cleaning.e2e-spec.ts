@@ -12,7 +12,12 @@ type ErrorBody = {
   errors: { field: string; code: string }[];
 };
 type LoginBody = { accessToken: string };
-type ChoreBody = { id: string; name: string; frequency: string; done: boolean };
+type ChoreBody = {
+  id: string;
+  name: string;
+  frequencyWeeks: number;
+  done: boolean;
+};
 type WeekEntryBody = {
   user: { id: string; name: string };
   chores: ChoreBody[];
@@ -33,13 +38,11 @@ describe('Cleaning (e2e)', () => {
     app = moduleFixture.createNestApplication();
     await app.init();
     prisma = moduleFixture.get(PrismaService);
-  });
 
-  afterAll(async () => {
-    await app.close();
-  });
-
-  beforeEach(async () => {
+    // Seeded and logged in once — the login-identifier throttle (5 per 15
+    // minutes, see throttler.config.ts) would trip if every test logged in
+    // fresh in a per-test beforeEach (see reminders.e2e-spec.ts for the
+    // same fix).
     await prisma.$executeRaw`TRUNCATE households, users, chores, chore_completions RESTART IDENTITY CASCADE`;
 
     const household = await prisma.household.create({
@@ -84,6 +87,14 @@ describe('Cleaning (e2e)', () => {
     accessToken = (loginRes.body as LoginBody).accessToken;
   });
 
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await prisma.$executeRaw`TRUNCATE chores, chore_completions RESTART IDENTITY CASCADE`;
+  });
+
   function authed() {
     return { Authorization: `Bearer ${accessToken}` };
   }
@@ -105,16 +116,43 @@ describe('Cleaning (e2e)', () => {
     });
   });
 
-  it('splits this week’s chores by rotation group, both users always present', async () => {
+  it('splits this week’s occurring chores by assignment, both users always present', async () => {
     await prisma.chore.create({
-      data: { name: 'Cuisine', rotationGroup: 'A' },
+      data: {
+        name: 'Cuisine',
+        frequencyWeeks: 1,
+        assignmentMode: 'ROTATING',
+        anchorIsoWeek: '2024-W01',
+        anchorUserId: firstUserId,
+      },
     });
     await prisma.chore.create({
-      data: { name: 'Salle de bain', rotationGroup: 'B' },
+      data: {
+        name: 'Salle de bain',
+        frequencyWeeks: 1,
+        assignmentMode: 'ROTATING',
+        anchorIsoWeek: '2024-W01',
+        anchorUserId: secondUserId,
+      },
     });
-    await prisma.chore.create({ data: { name: 'Draps', rotationGroup: 'C' } });
     await prisma.chore.create({
-      data: { name: 'Couloir', rotationGroup: 'D' },
+      data: {
+        name: 'Draps',
+        frequencyWeeks: 2,
+        assignmentMode: 'ROTATING',
+        anchorIsoWeek: '2024-W01',
+        anchorUserId: firstUserId,
+      },
+    });
+    // A future-anchored chore doesn't occur this week — must not appear.
+    await prisma.chore.create({
+      data: {
+        name: 'Couloir',
+        frequencyWeeks: 1,
+        assignmentMode: 'ROTATING',
+        anchorIsoWeek: '2030-W01',
+        anchorUserId: secondUserId,
+      },
     });
 
     const res = await request(app.getHttpServer())
@@ -127,18 +165,74 @@ describe('Cleaning (e2e)', () => {
     expect(body.map((entry) => entry.user.id).sort()).toEqual(
       [firstUserId, secondUserId].sort(),
     );
-    // Every chore is assigned to exactly one of the two users each week.
     const allChoreNames = body.flatMap((entry) =>
       entry.chores.map((c) => c.name),
     );
     expect(allChoreNames.sort()).toEqual(
-      ['Couloir', 'Cuisine', 'Draps', 'Salle de bain'].sort(),
+      ['Cuisine', 'Draps', 'Salle de bain'].sort(),
     );
   });
 
-  it('toggles a completion on and off, assigned to whichever user holds that rotation group', async () => {
+  it('a biweekly chore disappears entirely on its off-week', async () => {
+    const sheets = await prisma.chore.create({
+      data: {
+        name: 'Draps',
+        frequencyWeeks: 2,
+        assignmentMode: 'ROTATING',
+        anchorIsoWeek: '2024-W01',
+        anchorUserId: firstUserId,
+      },
+    });
+
+    const onWeek = await request(app.getHttpServer())
+      .get('/cleaning?week=2024-W01')
+      .set(authed())
+      .expect(200);
+    const offWeek = await request(app.getHttpServer())
+      .get('/cleaning?week=2024-W02')
+      .set(authed())
+      .expect(200);
+
+    const idsOn = (onWeek.body as WeekEntryBody[]).flatMap((e) =>
+      e.chores.map((c) => c.id),
+    );
+    const idsOff = (offWeek.body as WeekEntryBody[]).flatMap((e) =>
+      e.chores.map((c) => c.id),
+    );
+    expect(idsOn).toContain(sheets.id);
+    expect(idsOff).not.toContain(sheets.id);
+  });
+
+  it('rejects toggling a chore that is not scheduled this week', async () => {
+    const sheets = await prisma.chore.create({
+      data: {
+        name: 'Draps',
+        frequencyWeeks: 2,
+        assignmentMode: 'ROTATING',
+        anchorIsoWeek: '2024-W01',
+        anchorUserId: firstUserId,
+      },
+    });
+
+    const res = await request(app.getHttpServer())
+      .patch(`/cleaning/chores/${sheets.id}/toggle`)
+      .set(authed())
+      .send({ isoWeek: '2024-W02' })
+      .expect(409);
+    expect((res.body as ErrorBody).errors).toEqual([
+      { field: 'form', code: 'chore_not_scheduled' },
+    ]);
+  });
+
+  it('toggles a completion on and off, assigned to whoever the current rotation assigns', async () => {
     const kitchen = await prisma.chore.create({
-      data: { name: 'Cuisine', rotationGroup: 'A' },
+      data: {
+        name: 'Cuisine',
+        frequencyWeeks: 1,
+        assignmentMode: 'ROTATING',
+        anchorIsoWeek: '2024-W01',
+        anchorUserId: firstUserId,
+      },
     });
 
     await request(app.getHttpServer())

@@ -78,13 +78,16 @@ describe('CleaningService', () => {
       expect(await cleaning.getWeek(user.id, '2026-W32')).toEqual([]);
     });
 
-    it('splits chores by rotation group per user, marking completions done', async () => {
+    it('assigns occurring chores per rotation.service.ts, marking completions done', async () => {
       const { first, second } = await seedHouseholdOfTwo();
       const kitchen = await prisma.chore.create({
-        data: { name: 'Cuisine', rotationGroup: 'A' },
-      });
-      await prisma.chore.create({
-        data: { name: 'Salle de bain', rotationGroup: 'B' },
+        data: {
+          name: 'Cuisine',
+          frequencyWeeks: 1,
+          assignmentMode: 'ROTATING',
+          anchorIsoWeek: '2024-W01',
+          anchorUserId: first.id,
+        },
       });
       await prisma.choreCompletion.create({
         data: { choreId: kitchen.id, userId: first.id, isoWeek: '2024-W01' },
@@ -96,13 +99,77 @@ describe('CleaningService', () => {
       expect(result.map((r) => r.user.id)).toEqual([first.id, second.id]);
       const firstEntry = result.find((r) => r.user.id === first.id);
       expect(firstEntry?.chores).toEqual([
-        { id: kitchen.id, name: 'Cuisine', frequency: 'weekly', done: true },
+        { id: kitchen.id, name: 'Cuisine', frequencyWeeks: 1, done: true },
       ]);
       const secondEntry = result.find((r) => r.user.id === second.id);
-      expect(secondEntry?.chores[0]).toMatchObject({
-        frequency: 'weekly',
-        done: false,
+      expect(secondEntry?.chores).toEqual([]);
+    });
+
+    it('both user entries are always present, even with an empty chores array', async () => {
+      const { first, second } = await seedHouseholdOfTwo();
+      // A chore anchored far in the future never occurs — no chore rows at
+      // all this week, but both columns should still render.
+      await prisma.chore.create({
+        data: {
+          name: 'Some day',
+          frequencyWeeks: 1,
+          assignmentMode: 'ROTATING',
+          anchorIsoWeek: '2030-W01',
+          anchorUserId: first.id,
+        },
       });
+
+      const result = await cleaning.getWeek(first.id, '2024-W01');
+
+      expect(result.map((entry) => entry.user.id)).toEqual([
+        first.id,
+        second.id,
+      ]);
+      expect(result.map((entry) => entry.chores)).toEqual([[], []]);
+    });
+
+    it('a biweekly chore is absent (not just empty) on its off-week', async () => {
+      const { first } = await seedHouseholdOfTwo();
+      const sheets = await prisma.chore.create({
+        data: {
+          name: 'Draps',
+          frequencyWeeks: 2,
+          assignmentMode: 'ROTATING',
+          anchorIsoWeek: '2024-W01',
+          anchorUserId: first.id,
+        },
+      });
+
+      const onWeek = await cleaning.getWeek(first.id, '2024-W01');
+      const offWeek = await cleaning.getWeek(first.id, '2024-W02');
+
+      expect(onWeek.flatMap((e) => e.chores.map((c) => c.id))).toContain(
+        sheets.id,
+      );
+      expect(offWeek.flatMap((e) => e.chores.map((c) => c.id))).not.toContain(
+        sheets.id,
+      );
+    });
+
+    it('a pinned chore always lands under the same user', async () => {
+      const { first, second } = await seedHouseholdOfTwo();
+      await prisma.chore.create({
+        data: {
+          name: 'Poubelles',
+          frequencyWeeks: 1,
+          assignmentMode: 'PINNED',
+          anchorIsoWeek: '2024-W01',
+          anchorUserId: second.id,
+        },
+      });
+
+      const week1 = await cleaning.getWeek(first.id, '2024-W01');
+      const week2 = await cleaning.getWeek(first.id, '2024-W02');
+
+      const owner = (result: typeof week1) =>
+        result.find((e) => e.chores.length > 0)?.user.id;
+      expect(owner(week1)).toBe(second.id);
+      expect(owner(week2)).toBe(second.id);
     });
 
     it('never exposes passwordHash on the returned users', async () => {
@@ -124,13 +191,18 @@ describe('CleaningService', () => {
       ).rejects.toThrow(ApiError);
     });
 
-    it('creates a completion assigned to whichever user holds that rotation group this week', async () => {
+    it('creates a completion assigned to whoever the current rotation assigns that week', async () => {
       const { first, second } = await seedHouseholdOfTwo();
       const kitchen = await prisma.chore.create({
-        data: { name: 'Cuisine', rotationGroup: 'A' },
+        data: {
+          name: 'Cuisine',
+          frequencyWeeks: 1,
+          assignmentMode: 'ROTATING',
+          anchorIsoWeek: '2024-W01',
+          anchorUserId: first.id,
+        },
       });
 
-      // Week 1: weeklyGroup A goes to the household's first member.
       await cleaning.toggleCompletion(second.id, kitchen.id, '2024-W01');
 
       const completion = await prisma.choreCompletion.findUniqueOrThrow({
@@ -144,7 +216,13 @@ describe('CleaningService', () => {
     it('toggling twice removes the completion', async () => {
       const { first } = await seedHouseholdOfTwo();
       const kitchen = await prisma.chore.create({
-        data: { name: 'Cuisine', rotationGroup: 'A' },
+        data: {
+          name: 'Cuisine',
+          frequencyWeeks: 1,
+          assignmentMode: 'ROTATING',
+          anchorIsoWeek: '2024-W01',
+          anchorUserId: first.id,
+        },
       });
 
       await cleaning.toggleCompletion(first.id, kitchen.id, '2024-W01');
@@ -153,6 +231,56 @@ describe('CleaningService', () => {
       const completion = await prisma.choreCompletion.findUnique({
         where: {
           choreId_isoWeek: { choreId: kitchen.id, isoWeek: '2024-W01' },
+        },
+      });
+      expect(completion).toBeNull();
+    });
+
+    it('rejects toggling a chore that is not scheduled this week', async () => {
+      const { first } = await seedHouseholdOfTwo();
+      const sheets = await prisma.chore.create({
+        data: {
+          name: 'Draps',
+          frequencyWeeks: 2,
+          assignmentMode: 'ROTATING',
+          anchorIsoWeek: '2024-W01',
+          anchorUserId: first.id,
+        },
+      });
+
+      await expect(
+        cleaning.toggleCompletion(first.id, sheets.id, '2024-W02'),
+      ).rejects.toThrow(ApiError);
+
+      try {
+        await cleaning.toggleCompletion(first.id, sheets.id, '2024-W02');
+      } catch (error) {
+        expect((error as ApiError).getStatus()).toBe(409);
+      }
+    });
+
+    it('still allows un-toggling a stale completion for a now-off week', async () => {
+      const { first } = await seedHouseholdOfTwo();
+      const sheets = await prisma.chore.create({
+        data: {
+          name: 'Draps',
+          frequencyWeeks: 2,
+          assignmentMode: 'ROTATING',
+          anchorIsoWeek: '2024-W01',
+          anchorUserId: first.id,
+        },
+      });
+      // A completion that predates the chore becoming biweekly (simulating
+      // a stale row from before a frequency edit).
+      await prisma.choreCompletion.create({
+        data: { choreId: sheets.id, userId: first.id, isoWeek: '2024-W02' },
+      });
+
+      await cleaning.toggleCompletion(first.id, sheets.id, '2024-W02');
+
+      const completion = await prisma.choreCompletion.findUnique({
+        where: {
+          choreId_isoWeek: { choreId: sheets.id, isoWeek: '2024-W02' },
         },
       });
       expect(completion).toBeNull();
