@@ -4,12 +4,9 @@ import type { Request } from 'express';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 
 import { ACCESS_TOKEN_COOKIE_NAME } from './access-token-cookie';
+import { getJwtPublicKey } from './jwt-keys';
 
 export type JwtPayload = { sub: string };
-
-if (!process.env.JWT_SECRET) {
-  throw new Error('JWT_SECRET is not set');
-}
 
 function cookieExtractor(req: Request): string | null {
   const cookies = req.cookies as Record<string, string> | undefined;
@@ -27,7 +24,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         cookieExtractor,
       ]),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET as string,
+      secretOrKey: getJwtPublicKey(),
+      // Required with an asymmetric key — without an explicit allow-list,
+      // a forged token could set alg: HS256 in its header and get verified
+      // using this public key (which isn't secret) as an HMAC secret.
+      algorithms: ['RS256'],
     });
   }
 

@@ -223,6 +223,28 @@ today `my-home` is the only client.
   re-login isn't constant, and revisit if that turns out to be wrong
 - The JWT payload carries `sub` (user id) only — no roles/permissions to
   encode, this app still has no authorization system beyond "signed in"
+- **RS256, not HS256.** This service signs with `JWT_PRIVATE_KEY` (an RSA
+  private key, PEM, never committed — see `.env.example` for how to
+  generate one); any client verifies with the matching `JWT_PUBLIC_KEY`.
+  The public key isn't a secret — handing it to `my-home` (or a future
+  mobile client) to verify tokens locally doesn't create the coupling a
+  shared symmetric secret would: rotating the keypair means updating
+  `JWT_PUBLIC_KEY` wherever it's copied to, but a leaked public key alone
+  can't forge a token, only a leaked private key can. `src/auth/jwt-keys.ts`
+  loads and normalizes both from the environment (see the PEM-to-single-
+  line note there); `JwtStrategy` pins `algorithms: ['RS256']` explicitly —
+  without that allow-list, a forged token could set `alg: HS256` in its
+  header and get verified using the public key as an HMAC secret, since
+  it's public
+- Public key distribution today is a plain env var copied into `my-home`'s
+  own `.env`, not an HTTP endpoint — the only client is a server-side app
+  that already reads its config from the environment, so an endpoint would
+  add a network dependency (and a cache-invalidation question on rotation)
+  to solve a problem the env var doesn't have. Revisit if a client shows up
+  that can't be handed the key at deploy time (a third-party integration,
+  say) — a `GET /.well-known/jwks.json` alongside the env var, not instead
+  of it, would be the natural next step, and wouldn't require touching
+  existing clients
 - A global `JwtAuthGuard` (via `APP_GUARD`) protects every route by default;
   opt out per-route with a `@Public()` decorator for `/auth/login`,
   `/auth/register`, `/auth/activate`
@@ -296,10 +318,14 @@ commit without asking each time, scoped to local commits only.
 - A Prisma schema change and its generated migration folder belong in the
   **same commit** — never commit a `schema.prisma` edit without the migration
   it produced, or the next person's `prisma migrate dev` will diverge.
-- Never commit `.env`, `JWT_SECRET`, `DATABASE_URL`, SMTP credentials, or
-  `pg_dump` output. Secrets live in the environment, not the repo.
+- Never commit `.env`, `JWT_PRIVATE_KEY`, `DATABASE_URL`, SMTP credentials,
+  or `pg_dump` output. Secrets live in the environment, not the repo.
+  `JWT_PUBLIC_KEY` is the exception — it's not a secret, and `.env.test`
+  commits a dedicated test-only keypair for exactly that reason.
 - Commit messages: short, imperative, present tense (`add invite expiry check`,
   `fix login timing leak`), following the style of prior commits in the repo.
+- **Do not add a `Co-Authored-By` trailer or any AI-attribution line to commit
+  messages.**
 - **Never push.** Commits stay local until the user explicitly asks for a
   push — the general git safety protocol around pushing still applies.
 - Still ask before any destructive or history-rewriting git operation

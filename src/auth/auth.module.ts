@@ -10,6 +10,7 @@ import { AuthService } from './auth.service';
 import { InvitesController } from './invites.controller';
 import { InvitesService } from './invites.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { getJwtPrivateKey, getJwtPublicKey } from './jwt-keys';
 import { JwtStrategy } from './jwt.strategy';
 
 // Owns: households, users, invites, email_verifications. CLAUDE.md's module
@@ -21,8 +22,10 @@ import { JwtStrategy } from './jwt.strategy';
     MailModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({
-      secret: process.env.JWT_SECRET,
+      privateKey: getJwtPrivateKey(),
+      publicKey: getJwtPublicKey(),
       signOptions: {
+        algorithm: 'RS256',
         expiresIn: (process.env.JWT_EXPIRES_IN ?? '30d') as StringValue,
       },
     }),
