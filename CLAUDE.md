@@ -74,7 +74,9 @@ src/
     ingredients.ts              # name normalisation — pure, unit-tested
   cleaning/
     cleaning.controller.ts      # GET /cleaning?week=2026-W32
-    rotation.ts                   # pure chore-rotation function, heavily tested
+    rotation.service.ts           # pure chore-rotation function, heavily tested
+    chores.controller.ts          # admin CRUD: add/edit/remove chores
+    household-members.service.ts  # shared "ordered household members" query
   reminders/
     reminders.controller.ts
   common/
@@ -112,42 +114,99 @@ French text, or any display copy, in this codebase.
 
 ## Chore rotation
 
-The core domain rule, ported as-is from the old frontend. Implement it once,
-as a pure function in `src/cleaning/rotation.ts`, tested in isolation. Never
-scatter this logic across controllers or services.
+Each chore carries its **own** schedule and assignment — there is no fixed
+set of rotation groups. Implement the schedule/assignment logic once, as a
+pure function in `src/cleaning/rotation.service.ts`, tested in isolation.
+Never scatter this logic across controllers or services.
 
-Two rotating groups, both keyed off the ISO week number relative to a fixed
-`ROTATION_EPOCH` constant:
+A chore's config (`chores` table — see Database) is:
 
-**Weekly swap** — alternates every week:
-- Group A: Kitchen, Trash
-- Group B: Bathroom, Surfaces, Floors
-
-**Biweekly swap** — alternates every two weeks:
-- Group C: Bedsheets
-- Group D: Corridor
-
-The biweekly pair is always assigned to **opposite** people: whoever has
-Bedsheets does not have Corridor that week.
+- `frequencyWeeks` — 1 = weekly, N = occurs every N weeks. A chore with
+  `frequencyWeeks > 1` does not occur at all on its off-weeks: it isn't
+  returned by `GET /cleaning`, isn't assigned to anyone, and toggling its
+  completion on an off-week is rejected (`chore_not_scheduled`, 409). This
+  is a deliberate property, not a gap — "biweekly" means *absent* every
+  other week, not "present every week with the assignee swapping."
+- `anchorIsoWeek` — the ISO week (`2026-W32`) this chore first occurred.
+  Every later occurrence is derived from this: `isoWeek` is an occurrence
+  iff it's on-or-after the anchor and `(isoWeek - anchorIsoWeek)` in weeks
+  is a multiple of `frequencyWeeks`. Nothing else is stored about the
+  schedule — changing `frequencyWeeks` or `anchorIsoWeek` immediately
+  redefines every past and future occurrence.
+- `assignmentMode` — `ROTATING` or `PINNED`.
+- `anchorUserId` — dual meaning depending on `assignmentMode`: for
+  `PINNED`, the permanent assignee, full stop; for `ROTATING`, who was
+  assigned on the chore's anchor week (its 0th occurrence) — assignment
+  alternates from there, one flip per *occurrence*, not per calendar week
+  (so a biweekly rotating chore alternates every other week, in step with
+  its own occurrences, not every week). Two rotating chores are entirely
+  independent — there is no cross-chore "opposite person" constraint the
+  way the old A/B/C/D groups had; a pinned chore never affects any other
+  chore's rotation either.
 
 Rules:
 
-- Signature: `getWeekAssignment(isoWeek: string, users: [User, User]): Assignment`
-  — the tuple type is load-bearing: this function is only defined for two
-  people. If the household ever has a third+ member (possible now via
-  invites, see Authentication), calling this needs a redesign first; don't
-  paper over it with `users[0]`/`users[1]` slicing
-- **Pure and deterministic** — same week in, same result out, no database access
-- Assignments are never written to the database. Only *completions* are stored.
+- Signatures, both on `RotationService`:
+  - `getChoreAssignment(isoWeek: string, chore: ChoreConfig, users: [RotationUser, RotationUser]): { userId: string } | null`
+    — `null` means the chore does not occur that week
+  - `getWeekOccurrences(isoWeek: string, chores: ChoreConfig[], users: [RotationUser, RotationUser]): { choreId: string; userId: string }[]`
+    — a pure filter/map over the above, only the chores that occur
+  - the `[RotationUser, RotationUser]` tuple is load-bearing: this is only
+    defined for two people. If the household ever has a third+ member
+    (possible now via invites, see Authentication), calling this needs a
+    redesign first; don't paper over it with `users[0]`/`users[1]` slicing
+  - both throw a plain `Error` (not an `ApiError`) if `anchorUserId`
+    matches neither user, or `frequencyWeeks` isn't a positive integer —
+    these are invariants `ChoresService` must enforce on create/update,
+    not input either function should have to defend against at call time
+- **Pure and deterministic** — same week + chore config in, same result
+  out, no database access. A Prisma `Chore` row satisfies `ChoreConfig`
+  structurally, so callers pass rows straight through with no mapping step
+- Assignments are never written to the database. Only *completions* are stored
 - User order is stable, from `households.member_order` (an array of user
-  ids). Rotation does not scramble if a row's `created_at` changes.
+  ids), via the shared `HouseholdMembersService`. Rotation does not scramble
+  if a row's `created_at` changes
 
 Test past, current, and future weeks plus the year boundary — ISO weeks do
-not align with calendar years. Use `date-fns` (`getISOWeek`, `parseISO`),
-never a hand-rolled division by 7.
+not align with calendar years. Use `date-fns`
+(`differenceInCalendarISOWeeks`, `parseISO`), never a hand-rolled division
+by 7.
 
-`GET /cleaning?week=2026-W32` returns the computed assignment merged with
-that week's stored completions — the frontend never computes rotation itself.
+`GET /cleaning?week=2026-W32` returns the computed occurrences, grouped by
+user and merged with that week's stored completions — the frontend never
+computes rotation itself. Both users are always present in the response,
+even with an empty `chores` array for one of them (e.g. every chore that
+week landed on the other person, or nothing occurs at all).
+
+`GET/POST /cleaning/chores` and `PATCH/DELETE /cleaning/chores/:choreId`
+(alongside the existing toggle route) are the admin CRUD for chore configs
+— see `ChoresService`. `anchorUserId` is validated against the caller's
+household there (a DB lookup, so it can't live in the DTO), reusing the
+`invalid_id` code `RemindersService` already uses for the same "referenced
+user id doesn't check out" shape.
+
+### Editing a chore's schedule after completions already exist
+
+Editing `frequencyWeeks`/`anchorIsoWeek`/`assignmentMode` on an existing
+chore redefines what "on"/"off" and "who" mean for *every* week, including
+past ones — there's no history-preserving migration of old
+`chore_completions` rows when this happens, and none is attempted:
+
+- A completion for a week that no longer satisfies the new schedule isn't
+  deleted. It just becomes permanently unreachable through the API:
+  `getWeekOccurrences` stops emitting that chore for that week, so
+  `GET /cleaning` never surfaces it and `toggleCompletion` 409s
+  (`chore_not_scheduled`) if something still tries to touch it. The row
+  sits there, inert but harmless, and still cascades if the chore itself
+  is deleted.
+- The *displayed* assignee can diverge from who actually completed it —
+  this predates chores being editable, it's just newly reachable now.
+  `getWeek()`'s grouping only ever checks *whether* a completion exists for
+  `(choreId, isoWeek)`; it never reads the completion's stored `userId`
+  back for placement. The checkbox renders under whoever the *current*
+  config assigns that week, so a previously-completed chore can visibly
+  "jump columns" to the other person after an `assignmentMode`/
+  `anchorUserId` edit. Documented behavior, not a bug to fix here.
 
 ## Database
 
@@ -165,7 +224,7 @@ is constructed — inject it, never `new PrismaClient()` elsewhere.
 | `shopping_items` | list_id, name, quantity, unit, checked, source_recipe_id nullable |
 | `recipes` | name, servings, instructions |
 | `recipe_ingredients` | recipe_id, name, quantity, unit, position |
-| `chores` | name, rotation_group (`A`\|`B`\|`C`\|`D`) |
+| `chores` | name, frequency_weeks, assignment_mode (`ROTATING`\|`PINNED`), anchor_iso_week, anchor_user_id |
 | `chore_completions` | chore_id, user_id, iso_week, completed_at |
 | `reminders` | title, due_at, done_at nullable, assignee_ids (0-2, no FK — array column) |
 
@@ -175,17 +234,26 @@ This is the same schema the old Drizzle setup used — port it into
 - `id` is a `uuid` with a default (`dbgenerated("gen_random_uuid()")` or
   Prisma's `uuid()` default — pick one and use it everywhere)
 - `created_at` / `updated_at` are `@db.Timestamptz`, not plain `timestamp`
-- Chore *assignment* is computed by `rotation.ts`. Only completions are
-  persisted, keyed by `(chore_id, iso_week)` with a unique constraint
+- Chore *assignment* is computed by `rotation.service.ts` from each chore's
+  own `frequency_weeks`/`assignment_mode`/`anchor_iso_week`/`anchor_user_id`
+  — never stored. Only completions are persisted, keyed by
+  `(chore_id, iso_week)` with a unique constraint
+- `chores.anchor_user_id` is `onDelete: Restrict`, not `Cascade` — a chore
+  config is household-level, not the anchor user's own data; it shouldn't
+  vanish (or drag its completion history down with it) if a remove-user
+  flow is ever added
 - Reminder completion is `done_at` nullable, not a boolean — undo sets it to null
 - `shopping_items.source_recipe_id` is `onDelete: SetNull`: deleting a recipe
   must never remove items already on a list
 - Ingredient count on the recipe overview is an aggregate query
   (`_count`), not a stored counter column
 - Foreign keys always declare `onDelete` explicitly
-- Schema changes: edit `schema.prisma`, run `prisma migrate dev`, review the
-  generated SQL, commit the migration folder — never hand-edit a migration
-  after it's been applied anywhere
+- Schema changes: edit `schema.prisma`, then see the Migration history
+  note below — `prisma migrate dev` cannot be trusted to apply cleanly
+  against the real datasource here, so migrations are scaffolded/hand-
+  written and applied via `prisma db execute` + `prisma migrate resolve
+  --applied` instead. Never hand-edit a migration after it's been applied
+  anywhere
 - `password_hash` must never be selected outside the auth service. Any
   query, controller, or DTO that touches `users` — this service or a future
   one (`households/me`, an admin listing, whatever) — returns a projected
@@ -301,7 +369,7 @@ npm run start:prod
 npm run lint
 npm run test              # jest, unit
 npm run test:e2e          # supertest against a real Nest app instance
-npx prisma migrate dev
+npx prisma migrate dev  # see Database's Migration history note before using this for real
 npx prisma generate
 ```
 
@@ -337,8 +405,10 @@ commit without asking each time, scoped to local commits only.
 
 ## Testing
 
-- `rotation.ts` is the highest-value test target — cover weekly alternation,
-  biweekly alternation, the opposite-person constraint, and year boundaries
+- `rotation.service.ts` is the highest-value test target — cover weekly and
+  every-N-week occurrence, off-week `null`s, the anchor week itself, pinned
+  vs. rotating, two independent rotating chores landing on the same person
+  the same week (no cross-chore constraint), and year boundaries
 - `addIngredientsToList()` — cover merge into an unchecked row, no-merge into
   a checked row, unit mismatch, and the new-list-then-redirect path
 - Services get unit tests against a test database (or a mocked
@@ -347,7 +417,12 @@ commit without asking each time, scoped to local commits only.
 - Every DTO gets an invalid-input e2e test, not just the happy path
 - e2e (Supertest) covers: login, invite -> register -> activate, check off a
   shopping item, add a recipe to an existing list, create a list from a
-  recipe, complete a chore, toggle a reminder
+  recipe, complete a chore, toggle a reminder, add/edit/remove a chore
+  config
+- e2e spec files with several tests: seed the household and log in once in
+  `beforeAll`, not per-test in `beforeEach` — the login-identifier throttle
+  (5 per 15 minutes, see `throttler.config.ts`) trips otherwise. Truncate
+  only the tables that need per-test isolation in `beforeEach`
 
 ## Conventions
 
@@ -427,8 +502,30 @@ statements would have failed outright against tables that already existed;
 check `git log -- prisma/migrations` if that's ever in doubt). `prisma
 migrate status` confirms the migration history and the live schema agree
 ("Database schema is up to date"), and `schema.prisma` has had no changes
-since that baseline. `prisma migrate dev` is safe to use normally for future
-schema changes — re-run `prisma migrate status` first if you have any doubt
-before trusting that. `my-home`'s `app/db/` (Drizzle) still exists, but only
-for local dev seeding (see its `CLAUDE.md`'s Database section) — it doesn't
-touch schema or migrations, so it has no bearing on any of the above.
+since that baseline.
+
+**`prisma migrate dev` is *not* safe to run normally here, and this has now
+been tested for real** (the per-chore-configuration migration, see Chore
+rotation): the naming/default differences between what Drizzle originally
+created and what a fresh `prisma migrate dev` replay of the migration
+history produces (e.g. `_key` vs. `_unique` index suffixes,
+`DbGenerated("gen_random_uuid()")` vs. Prisma's own default) make its shadow-
+database drift check fire on the *real* datasource — it asks to reset the
+actual dev database, not a disposable shadow one, to "fix" drift that isn't
+real. Do not answer yes to that prompt. Instead, for any future schema
+change: run `prisma migrate dev --create-only` to get a scaffolded
+migration folder (or write one by hand), edit `migration.sql` to do exactly
+what's needed, apply it directly against each real datasource with
+`prisma db execute --file <path> --schema prisma/schema.prisma` (this
+skips the shadow-db diff entirely), then run
+`prisma migrate resolve --applied <migration_name>` against each datasource
+so `prisma migrate status` recognizes it without replaying — the same
+two-step pattern the original baseline already used. Both `.env`'s
+`DATABASE_URL` (dev) and `.env.test`'s (a *separate* database,
+`hearth_backend_test`) need the migration applied and resolved
+independently — `prisma migrate resolve` only touches whichever
+`DATABASE_URL` is active when it's run.
+
+`my-home`'s `app/db/` (Drizzle) still exists, but only for local dev
+seeding (see its `CLAUDE.md`'s Database section) — it doesn't touch schema
+or migrations, so it has no bearing on any of the above.
