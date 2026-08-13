@@ -12,6 +12,9 @@ const CODE_BY_CONSTRAINT: Record<string, string> = {
   isUuid: 'invalid_id',
   matchesPassword: 'password_mismatch',
   isIsoWeek: 'invalid_iso_week',
+  isIso8601: 'invalid_type',
+  arrayMaxSize: 'invalid_type',
+  isArray: 'invalid_type',
 };
 
 function flatten(errors: ValidationError[]): ApiFieldError[] {
