@@ -120,7 +120,6 @@ export class AuthService {
             email: invite.email,
             passwordHash,
             name: dto.name,
-            role: dto.role,
             avatarKey,
           },
         });

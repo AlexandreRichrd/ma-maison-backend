@@ -9,9 +9,6 @@ export class RegisterDto {
   @IsNotEmpty()
   name!: string;
 
-  @IsNotEmpty()
-  role!: string;
-
   @MinLength(8)
   password!: string;
 

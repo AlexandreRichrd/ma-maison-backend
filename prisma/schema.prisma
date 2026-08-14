@@ -35,7 +35,6 @@ model User {
   email           String    @unique
   passwordHash    String    @map("password_hash")
   name            String
-  role            String
   avatarKey       String    @map("avatar_key")
   // Null until the /activate link is clicked. Login is refused until then.
   emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(6)

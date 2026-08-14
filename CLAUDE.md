@@ -217,7 +217,7 @@ is constructed — inject it, never `new PrismaClient()` elsewhere.
 | Table | Notes |
 |---|---|
 | `households` | single row; holds `member_order` for stable rotation |
-| `users` | email, password_hash, household_id, name, avatar_key, role, email_verified_at nullable — see Authentication |
+| `users` | email, password_hash, household_id, name, avatar_key, email_verified_at nullable — see Authentication |
 | `invites` | household_id, invited_by_user_id, email, token, expires_at, accepted_at nullable |
 | `email_verifications` | user_id, token, expires_at, consumed_at nullable |
 | `shopping_lists` | name |

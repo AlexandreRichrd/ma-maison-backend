@@ -48,7 +48,6 @@ describe('Auth token source (e2e)', () => {
         email,
         passwordHash,
         name: 'Inviter',
-        role: 'Parent',
         avatarKey: 'inviter',
         emailVerifiedAt: new Date(),
       },

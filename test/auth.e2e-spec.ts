@@ -49,7 +49,6 @@ describe('Auth (e2e)', () => {
         email,
         passwordHash,
         name: 'Inviter',
-        role: 'Parent',
         avatarKey: 'inviter',
         emailVerifiedAt: new Date(),
       },
@@ -92,7 +91,6 @@ describe('Auth (e2e)', () => {
       .send({
         token: invite.token,
         name: 'New Person',
-        role: 'Partenaire',
         password: 'new-person-pass',
         confirmPassword: 'new-person-pass',
       })
@@ -153,7 +151,6 @@ describe('Auth (e2e)', () => {
       .send({
         token: invite.token,
         name: 'Accepted',
-        role: 'Partenaire',
         password: 'whatever-pass',
         confirmPassword: 'whatever-pass',
       })

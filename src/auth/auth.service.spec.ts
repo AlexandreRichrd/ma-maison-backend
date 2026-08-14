@@ -50,7 +50,6 @@ describe('AuthService', () => {
         email,
         passwordHash,
         name: 'Test User',
-        role: 'Parent',
         avatarKey: 'test-user',
         emailVerifiedAt: new Date(),
       },
@@ -150,7 +149,6 @@ describe('AuthService', () => {
           email: 'unverified@example.com',
           passwordHash,
           name: 'Unverified',
-          role: 'Parent',
           avatarKey: 'unverified',
           emailVerifiedAt: null,
         },
@@ -202,7 +200,6 @@ describe('AuthService', () => {
       const result = await auth.register({
         token: invite.token,
         name: 'New Person',
-        role: 'Partenaire',
         password: 'brand-new-pass',
         confirmPassword: 'brand-new-pass',
       });
@@ -236,7 +233,6 @@ describe('AuthService', () => {
         await auth.register({
           token: 'does-not-exist',
           name: 'X',
-          role: 'Y',
           password: 'brand-new-pass',
           confirmPassword: 'brand-new-pass',
         });
@@ -267,7 +263,6 @@ describe('AuthService', () => {
         auth.register({
           token: invite.token,
           name: 'X',
-          role: 'Y',
           password: 'brand-new-pass',
           confirmPassword: 'brand-new-pass',
         }),
@@ -294,7 +289,6 @@ describe('AuthService', () => {
         auth.register({
           token: invite.token,
           name: 'X',
-          role: 'Y',
           password: 'brand-new-pass',
           confirmPassword: 'brand-new-pass',
         }),
@@ -319,7 +313,6 @@ describe('AuthService', () => {
         await auth.register({
           token: invite.token,
           name: 'X',
-          role: 'Y',
           password: 'brand-new-pass',
           confirmPassword: 'brand-new-pass',
         });
@@ -354,14 +347,12 @@ describe('AuthService', () => {
         auth.register({
           token: inviteA.token,
           name: 'Person A',
-          role: 'A',
           password: 'brand-new-pass',
           confirmPassword: 'brand-new-pass',
         }),
         auth.register({
           token: inviteB.token,
           name: 'Person B',
-          role: 'B',
           password: 'brand-new-pass',
           confirmPassword: 'brand-new-pass',
         }),
@@ -396,7 +387,6 @@ describe('AuthService', () => {
           email: 'pending@example.com',
           passwordHash,
           name: 'Pending',
-          role: 'Parent',
           avatarKey: 'pending',
           emailVerifiedAt: null,
         },

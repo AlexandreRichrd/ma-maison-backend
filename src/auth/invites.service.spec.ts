@@ -37,7 +37,6 @@ describe('InvitesService', () => {
         email: 'inviter@example.com',
         passwordHash,
         name: 'Inviter',
-        role: 'Parent',
         avatarKey: 'inviter',
         emailVerifiedAt: new Date(),
       },

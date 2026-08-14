@@ -44,7 +44,6 @@ describe('Recipes (e2e)', () => {
         email: 'cook@example.com',
         passwordHash,
         name: 'Cook',
-        role: 'Parent',
         avatarKey: 'cook',
         emailVerifiedAt: new Date(),
       },

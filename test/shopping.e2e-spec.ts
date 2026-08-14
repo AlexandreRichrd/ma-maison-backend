@@ -43,7 +43,6 @@ describe('Shopping (e2e)', () => {
         email: 'shopper@example.com',
         passwordHash,
         name: 'Shopper',
-        role: 'Parent',
         avatarKey: 'shopper',
         emailVerifiedAt: new Date(),
       },

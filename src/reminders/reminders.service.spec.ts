@@ -31,7 +31,6 @@ describe('RemindersService', () => {
         email: 'mia@example.com',
         passwordHash: 'x',
         name: 'Mia',
-        role: 'Adulte',
         avatarKey: 'mia',
         emailVerifiedAt: new Date(),
       },

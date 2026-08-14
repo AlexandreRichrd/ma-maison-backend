@@ -12,7 +12,6 @@ export type HouseholdMemberDto = {
   id: string;
   name: string;
   avatarKey: string;
-  role: string;
 };
 
 @Injectable()
@@ -34,7 +33,7 @@ export class HouseholdMembersService {
 
     const members = await this.prisma.user.findMany({
       where: { householdId: household.id },
-      select: { id: true, name: true, avatarKey: true, role: true },
+      select: { id: true, name: true, avatarKey: true },
     });
     const byId = new Map(members.map((member) => [member.id, member]));
 

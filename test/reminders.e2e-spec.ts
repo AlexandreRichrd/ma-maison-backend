@@ -51,7 +51,6 @@ describe('Reminders (e2e)', () => {
         email: 'reminder-user@example.com',
         passwordHash,
         name: 'Reminder User',
-        role: 'Parent',
         avatarKey: 'ru',
         emailVerifiedAt: new Date(),
       },

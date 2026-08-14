@@ -60,7 +60,6 @@ describe('Auth throttling (e2e)', () => {
         email: 'invite-throttle@example.com',
         passwordHash,
         name: 'Inviter',
-        role: 'Parent',
         avatarKey: 'inviter',
         emailVerifiedAt: new Date(),
       },

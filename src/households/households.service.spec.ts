@@ -31,7 +31,6 @@ describe('HouseholdsService', () => {
         email,
         passwordHash,
         name: email.split('@')[0],
-        role: 'Adulte',
         avatarKey: email.split('@')[0],
         emailVerifiedAt: new Date(),
       },
