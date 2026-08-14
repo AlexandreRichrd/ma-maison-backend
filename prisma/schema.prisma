@@ -14,7 +14,7 @@ datasource db {
 }
 
 // ---------------------------------------------------------------------------
-// auth domain: households, users, invites, email_verifications
+// auth domain: households, users, invites, email_verifications, password_resets
 // ---------------------------------------------------------------------------
 
 model Household {
@@ -46,6 +46,7 @@ model User {
   anchoredChores     Chore[]
   sentInvites        Invite[]
   emailVerifications EmailVerification[]
+  passwordResets     PasswordReset[]
 
   @@map("users")
 }
@@ -79,6 +80,26 @@ model EmailVerification {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("email_verifications")
+}
+
+// A separate table from EmailVerification, not the same table with a type
+// discriminator — same reasoning that already keeps Invite apart from
+// EmailVerification despite the identical token/expiry/used-marker shape.
+// A reset token controls the credential itself, not just a verified flag,
+// so keeping it on its own table means a query can never accidentally
+// match the wrong kind of token.
+model PasswordReset {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  token      String    @unique
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_resets")
 }
 
 // ---------------------------------------------------------------------------

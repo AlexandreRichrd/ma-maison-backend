@@ -63,4 +63,13 @@ export class MailService {
       `Bienvenue sur Hearth ! Active ton compte pour pouvoir te connecter :\n\n${link}\n\nCe lien expire dans 24 heures.`,
     );
   }
+
+  async sendPasswordResetEmail(email: string, token: string): Promise<void> {
+    const link = this.appUrl(`/reset-password?token=${token}`);
+    await this.send(
+      email,
+      'Réinitialise ton mot de passe Hearth',
+      `Une réinitialisation de mot de passe a été demandée pour ce compte.\n\nChoisis un nouveau mot de passe ici : ${link}\n\nCe lien expire dans 1 heure. Si tu n'es pas à l'origine de cette demande, ignore cet email.`,
+    );
+  }
 }

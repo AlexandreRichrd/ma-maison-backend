@@ -58,7 +58,8 @@ src/
     prisma.module.ts      # @Global, exports PrismaService
   auth/
     auth.module.ts
-    auth.controller.ts     # POST /auth/login, /auth/register, /auth/activate
+    auth.controller.ts     # POST /auth/login, /auth/register, /auth/activate,
+                            #   /auth/forgot-password, /auth/reset-password
     auth.service.ts
     jwt.strategy.ts         # Passport JWT strategy
     jwt-auth.guard.ts       # applied via a global APP_GUARD, not per-route
@@ -220,6 +221,7 @@ is constructed — inject it, never `new PrismaClient()` elsewhere.
 | `users` | email, password_hash, household_id, name, avatar_key, email_verified_at nullable — see Authentication |
 | `invites` | household_id, invited_by_user_id, email, token, expires_at, accepted_at nullable |
 | `email_verifications` | user_id, token, expires_at, consumed_at nullable |
+| `password_resets` | user_id, token, expires_at, consumed_at nullable — same shape as `email_verifications`, deliberately a separate table (see Authentication's Forgot / reset password) |
 | `shopping_lists` | name |
 | `shopping_items` | list_id, name, quantity, unit, checked, source_recipe_id nullable |
 | `recipes` | name, servings, instructions |
@@ -315,7 +317,8 @@ today `my-home` is the only client.
   existing clients
 - A global `JwtAuthGuard` (via `APP_GUARD`) protects every route by default;
   opt out per-route with a `@Public()` decorator for `/auth/login`,
-  `/auth/register`, `/auth/activate`
+  `/auth/register`, `/auth/activate`, `/auth/forgot-password`,
+  `/auth/reset-password`
 - **This API does not set cookies.** The frontend is responsible for storing
   the JWT in its own `HttpOnly`/`Secure`/`SameSite=Lax` cookie and forwarding
   it as `Authorization: Bearer <token>` — never assume the token is safe in
@@ -329,7 +332,7 @@ today `my-home` is the only client.
   with a distinct error code — this check happens *after* password
   verification, not before, so it can't be used to probe whether an email
   has an account
-- Still out of scope: OAuth, password reset, refresh tokens/token revocation
+- Still out of scope: OAuth, refresh tokens/token revocation
 
 ### Invite / register / activate
 
@@ -359,6 +362,44 @@ frontend's real domain, not this API's. There is no separate "from address"
 setting — the From header is always built from `SMTP_USER`, since DMARC
 checks From against the authenticated sending mailbox and letting the two
 diverge is how mail lands in spam.
+
+### Forgot / reset password
+
+Registration is invite-gated, but recovery isn't: any signed-up user can
+request a reset, since there's otherwise no way back into an account whose
+password is forgotten short of editing the database by hand.
+
+1. `POST /auth/forgot-password` is `@Public()`, takes an email, and always
+   returns `{ ok: true }` — whether or not the email has an account. Only
+   when a matching user actually exists does it create a `password_resets`
+   row (random 32-byte-hex token, **1-hour** expiry — short on purpose,
+   unlike the 7-day invite or 24h verification window, since a reset link
+   is used right away or not at all) and send mail via `MailService` with a
+   link the frontend renders as `/reset-password?token=…`. Rate-limited via
+   `@nestjs/throttler`, per IP and per identifier (email), same policy as
+   login
+2. `POST /auth/reset-password` is `@Public()`, takes a token and a new
+   password, and rejects a missing, expired, or already-consumed token with
+   `reset_invalid`. On success it hashes the new password (argon2id),
+   consumes the token, and — see below — verifies the account if it wasn't
+   already. No throttle guard: the token is unguessable, so a request-volume
+   limit here protects against nothing a rate limiter would help with (same
+   reasoning as `/auth/activate`)
+3. `password_resets` is a separate table from `email_verifications`, not the
+   same table with a `type` column, despite the identical
+   token/expiry/consumed-at shape — same reasoning that already keeps
+   `invites` apart from `email_verifications`. A reset token controls the
+   credential itself, not just a verified flag, so a bug in one query can
+   never accidentally match the wrong kind of token if they're on different
+   tables
+4. **Resetting also verifies an unverified account**, if it wasn't already
+   (never overwrites a real `email_verified_at` with a later timestamp).
+   Deliberate: completing a reset — clicking a link mailed to the inbox,
+   then setting a new credential — proves control of that address at least
+   as strongly as clicking the original activation link would. There's no
+   resend-activation endpoint today, so refusing the reset for an
+   unverified account would leave that user with no way back in at all,
+   which is the exact lockout this feature exists to prevent
 
 ## Commands
 
@@ -428,10 +469,10 @@ commit without asking each time, scoped to local commits only.
   `PrismaService` for pure logic — prefer a real test DB for anything
   touching a transaction)
 - Every DTO gets an invalid-input e2e test, not just the happy path
-- e2e (Supertest) covers: login, invite -> register -> activate, check off a
-  shopping item, add a recipe to an existing list, create a list from a
-  recipe, complete a chore, toggle a reminder, add/edit/remove a chore
-  config
+- e2e (Supertest) covers: login, invite -> register -> activate, forgot ->
+  reset -> login, check off a shopping item, add a recipe to an existing
+  list, create a list from a recipe, complete a chore, toggle a reminder,
+  add/edit/remove a chore config
 - e2e spec files with several tests: seed the household and log in once in
   `beforeAll`, not per-test in `beforeEach` — the login-identifier throttle
   (5 per 15 minutes, see `throttler.config.ts`) trips otherwise. Truncate
@@ -484,7 +525,7 @@ now; it's not needed until the widget stops being a placeholder.
 Do not build these unless explicitly asked:
 
 - Refresh tokens / token revocation / logout-everywhere
-- OAuth, password reset
+- OAuth
 - Household edit, remove-user, or invite revocation endpoints
 - Redesigning chore rotation or reminder assignees for more than two people
   — invites can technically create a third+ user today, but nothing
@@ -493,8 +534,8 @@ Do not build these unless explicitly asked:
   the API
 - Servings scaling of ingredient quantities
 - Store tags on shopping items
-- Push or in-app notifications (transactional invite/activation email is the
-  only mail this API sends)
+- Push or in-app notifications (transactional invite/activation/password-reset
+  email is the only mail this API sends)
 - Multi-tenancy or third-party household sign-up
 - Row-Level Security
 - GraphQL, microservices, a message queue, or Redis

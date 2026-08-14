@@ -14,7 +14,12 @@ export class InvitesController {
 
   // No @Public() — the global JwtAuthGuard requires a signed-in user.
   @UseGuards(ThrottlerGuard)
-  @SkipThrottle({ 'login-ip': true, 'login-identifier': true })
+  @SkipThrottle({
+    'login-ip': true,
+    'login-identifier': true,
+    'forgot-password-ip': true,
+    'forgot-password-identifier': true,
+  })
   @Post()
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateInviteDto) {
     return this.invites.create(user.sub, dto.email);

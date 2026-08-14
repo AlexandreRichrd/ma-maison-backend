@@ -23,7 +23,7 @@ describe('AuthService', () => {
   });
 
   beforeEach(async () => {
-    await prisma.$executeRaw`TRUNCATE households, users, invites, email_verifications RESTART IDENTITY CASCADE`;
+    await prisma.$executeRaw`TRUNCATE households, users, invites, email_verifications, password_resets RESTART IDENTITY CASCADE`;
     auth = new AuthService(
       prisma,
       new JwtService({
@@ -454,6 +454,180 @@ describe('AuthService', () => {
       });
 
       await expect(auth.activate(token)).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe('forgotPassword', () => {
+    it('creates a token and sends mail for an existing account', async () => {
+      const household = await seedHousehold();
+      const user = await seedVerifiedUser(
+        household.id,
+        'mia@example.com',
+        'correct-horse',
+      );
+
+      const result = await auth.forgotPassword('mia@example.com');
+
+      expect(result).toEqual({ ok: true });
+      const reset = await prisma.passwordReset.findFirstOrThrow({
+        where: { userId: user.id },
+      });
+      expect(reset.consumedAt).toBeNull();
+      expect(reset.expiresAt.getTime()).toBeGreaterThan(Date.now());
+    });
+
+    it('normalizes email casing/whitespace before lookup', async () => {
+      const household = await seedHousehold();
+      const user = await seedVerifiedUser(
+        household.id,
+        'mia@example.com',
+        'correct-horse',
+      );
+
+      await auth.forgotPassword('  Mia@Example.com  ');
+
+      const reset = await prisma.passwordReset.findFirstOrThrow({
+        where: { userId: user.id },
+      });
+      expect(reset).not.toBeNull();
+    });
+
+    it('returns the exact same response for an unknown email, without creating a token', async () => {
+      const result = await auth.forgotPassword('nobody@example.com');
+
+      expect(result).toEqual({ ok: true });
+      expect(await prisma.passwordReset.count()).toBe(0);
+    });
+  });
+
+  describe('resetPassword', () => {
+    async function seedReset(
+      userId: string,
+      opts?: { expired?: boolean; consumed?: boolean },
+    ) {
+      const token = generateToken();
+      await prisma.passwordReset.create({
+        data: {
+          userId,
+          token,
+          expiresAt: new Date(
+            Date.now() + (opts?.expired ? -1000 : 60 * 60 * 1000),
+          ),
+          consumedAt: opts?.consumed ? new Date() : null,
+        },
+      });
+      return token;
+    }
+
+    it('hashes the new password, consumes the token, and allows login with it', async () => {
+      const household = await seedHousehold();
+      const user = await seedVerifiedUser(
+        household.id,
+        'mia@example.com',
+        'old-password',
+      );
+      const token = await seedReset(user.id);
+
+      const result = await auth.resetPassword(token, 'brand-new-password');
+
+      expect(result).toEqual({ ok: true });
+      const reset = await prisma.passwordReset.findUniqueOrThrow({
+        where: { token },
+      });
+      expect(reset.consumedAt).not.toBeNull();
+
+      // Old password no longer works, new one does.
+      await expect(
+        auth.login('mia@example.com', 'old-password'),
+      ).rejects.toThrow(ApiError);
+      const loginResult = await auth.login(
+        'mia@example.com',
+        'brand-new-password',
+      );
+      expect(loginResult.user.id).toBe(user.id);
+    });
+
+    it('also verifies an unverified account', async () => {
+      const household = await seedHousehold();
+      const passwordHash = await argon2.hash('old-password', {
+        type: argon2.argon2id,
+      });
+      const user = await prisma.user.create({
+        data: {
+          householdId: household.id,
+          email: 'unverified@example.com',
+          passwordHash,
+          name: 'Unverified',
+          avatarKey: 'unverified',
+          emailVerifiedAt: null,
+        },
+      });
+      const token = await seedReset(user.id);
+
+      await auth.resetPassword(token, 'brand-new-password');
+
+      const updatedUser = await prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+      });
+      expect(updatedUser.emailVerifiedAt).not.toBeNull();
+    });
+
+    it('does not overwrite an existing emailVerifiedAt timestamp', async () => {
+      const household = await seedHousehold();
+      const user = await seedVerifiedUser(
+        household.id,
+        'mia@example.com',
+        'old-password',
+      );
+      const originalVerifiedAt = user.emailVerifiedAt;
+      const token = await seedReset(user.id);
+
+      await auth.resetPassword(token, 'brand-new-password');
+
+      const updatedUser = await prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+      });
+      expect(updatedUser.emailVerifiedAt).toEqual(originalVerifiedAt);
+    });
+
+    it('rejects a missing token with reset_invalid', async () => {
+      await expect(
+        auth.resetPassword('does-not-exist', 'brand-new-password'),
+      ).rejects.toThrow(ApiError);
+    });
+
+    it('rejects an expired token with reset_invalid', async () => {
+      const household = await seedHousehold();
+      const user = await seedVerifiedUser(
+        household.id,
+        'mia@example.com',
+        'old-password',
+      );
+      const token = await seedReset(user.id, { expired: true });
+
+      try {
+        await auth.resetPassword(token, 'brand-new-password');
+        throw new Error('expected resetPassword to reject');
+      } catch (error) {
+        expect((error as ApiError).getResponse()).toEqual({
+          field: 'token',
+          code: 'reset_invalid',
+        });
+      }
+    });
+
+    it('rejects an already-consumed token with reset_invalid', async () => {
+      const household = await seedHousehold();
+      const user = await seedVerifiedUser(
+        household.id,
+        'mia@example.com',
+        'old-password',
+      );
+      const token = await seedReset(user.id, { consumed: true });
+
+      await expect(
+        auth.resetPassword(token, 'brand-new-password'),
+      ).rejects.toThrow(ApiError);
     });
   });
 });

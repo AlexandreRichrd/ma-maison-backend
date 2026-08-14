@@ -26,7 +26,7 @@ describe('Auth throttling (e2e)', () => {
     app = moduleFixture.createNestApplication();
     await app.init();
     prisma = moduleFixture.get(PrismaService);
-    await prisma.$executeRaw`TRUNCATE households, users, invites, email_verifications RESTART IDENTITY CASCADE`;
+    await prisma.$executeRaw`TRUNCATE households, users, invites, email_verifications, password_resets RESTART IDENTITY CASCADE`;
   });
 
   afterEach(async () => {
@@ -86,6 +86,20 @@ describe('Auth throttling (e2e)', () => {
       .post('/invites')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({ email: 'invitee-6@example.com' })
+      .expect(429);
+  });
+
+  it('allows 5 forgot-password requests for one identifier, then blocks the 6th', async () => {
+    const email = 'throttle-forgot@example.com';
+    for (let i = 0; i < 5; i++) {
+      await request(app.getHttpServer())
+        .post('/auth/forgot-password')
+        .send({ email })
+        .expect(200);
+    }
+    await request(app.getHttpServer())
+      .post('/auth/forgot-password')
+      .send({ email })
       .expect(429);
   });
 });

@@ -21,6 +21,10 @@ const DUMMY_HASH =
 
 const MIN_LOGIN_MS = 300;
 const VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
+// Short-lived on purpose, unlike the 7-day invite or 24h verification
+// window — a reset link is used right away or not at all, and a shorter
+// window shrinks how long a compromised inbox stays exploitable.
+const RESET_TTL_MS = 60 * 60 * 1000;
 
 export type PublicUser = Omit<User, 'passwordHash'>;
 
@@ -176,6 +180,72 @@ export class AuthService {
       this.prisma.user.update({
         where: { id: verification.userId },
         data: { emailVerifiedAt: new Date() },
+      }),
+    ]);
+
+    return { ok: true };
+  }
+
+  /**
+   * Always returns the same response whether or not the account exists —
+   * never reveal which emails are registered. Only creates a token and
+   * sends mail when a matching user is actually found.
+   */
+  async forgotPassword(email: string): Promise<{ ok: true }> {
+    const user = await this.prisma.user.findUnique({
+      where: { email: normalizeEmail(email) },
+    });
+
+    if (user) {
+      const token = generateToken();
+      await this.prisma.passwordReset.create({
+        data: {
+          userId: user.id,
+          token,
+          expiresAt: new Date(Date.now() + RESET_TTL_MS),
+        },
+      });
+      await this.mail.sendPasswordResetEmail(user.email, token);
+    }
+
+    return { ok: true };
+  }
+
+  async resetPassword(token: string, password: string): Promise<{ ok: true }> {
+    const reset = await this.prisma.passwordReset.findUnique({
+      where: { token },
+      include: { user: true },
+    });
+    const resetUsable =
+      reset !== null &&
+      reset.consumedAt === null &&
+      reset.expiresAt.getTime() > Date.now();
+    if (!resetUsable) {
+      throw new ApiError(400, 'token', 'reset_invalid');
+    }
+
+    const passwordHash = await argon2.hash(password, {
+      type: argon2.argon2id,
+    });
+
+    await this.prisma.$transaction([
+      this.prisma.passwordReset.update({
+        where: { id: reset.id },
+        data: { consumedAt: new Date() },
+      }),
+      this.prisma.user.update({
+        where: { id: reset.userId },
+        data: {
+          passwordHash,
+          // Completing a reset — clicking a link sent to the inbox, then
+          // setting a new credential — proves control of the address at
+          // least as strongly as the original activation link would.
+          // There's no resend-activation path today, so refusing this
+          // would leave an unverified account with no way back in at
+          // all. Never overwrite a real verification timestamp with a
+          // later one if it's already set.
+          emailVerifiedAt: reset.user.emailVerifiedAt ?? new Date(),
+        },
       }),
     ]);
 
