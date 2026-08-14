@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { AssignmentMode } from '@prisma/client';
 import * as argon2 from 'argon2';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -91,15 +92,31 @@ describe('Chores admin CRUD (e2e)', () => {
     return { Authorization: `Bearer ${accessToken}` };
   }
 
-  function validChore(overrides: Record<string, unknown> = {}) {
+  // The shape a valid chore row actually has. Kept separate from the HTTP
+  // fixture below so a direct `prisma.chore.create` write — which can only
+  // ever hold a real `AssignmentMode`, unlike a request body — gets that
+  // literal type instead of the widened `string` an inline object literal
+  // would infer.
+  function validChoreRow(): {
+    name: string;
+    frequencyWeeks: number;
+    assignmentMode: AssignmentMode;
+    anchorIsoWeek: string;
+    anchorUserId: string;
+  } {
     return {
       name: 'Cuisine',
       frequencyWeeks: 1,
-      assignmentMode: 'ROTATING',
+      assignmentMode: AssignmentMode.ROTATING,
       anchorIsoWeek: '2024-W01',
       anchorUserId: firstUserId,
-      ...overrides,
     };
+  }
+
+  // Request bodies, which may deliberately carry invalid values (see the
+  // rejects-an-invalid-% cases below) — overrides stay untyped on purpose.
+  function validChore(overrides: Record<string, unknown> = {}) {
+    return { ...validChoreRow(), ...overrides };
   }
 
   describe('GET /cleaning/chores', () => {
@@ -108,7 +125,7 @@ describe('Chores admin CRUD (e2e)', () => {
     });
 
     it('lists every chore', async () => {
-      await prisma.chore.create({ data: validChore() });
+      await prisma.chore.create({ data: validChoreRow() });
 
       const res = await request(app.getHttpServer())
         .get('/cleaning/chores')
@@ -199,7 +216,7 @@ describe('Chores admin CRUD (e2e)', () => {
 
   describe('PATCH /cleaning/chores/:choreId', () => {
     it('patches a chore', async () => {
-      const chore = await prisma.chore.create({ data: validChore() });
+      const chore = await prisma.chore.create({ data: validChoreRow() });
 
       const res = await request(app.getHttpServer())
         .patch(`/cleaning/chores/${chore.id}`)
@@ -219,7 +236,7 @@ describe('Chores admin CRUD (e2e)', () => {
     });
 
     it('rejects a real but non-household anchorUserId', async () => {
-      const chore = await prisma.chore.create({ data: validChore() });
+      const chore = await prisma.chore.create({ data: validChoreRow() });
       const otherHousehold = await prisma.household.create({
         data: { memberOrder: [] },
       });
@@ -244,7 +261,7 @@ describe('Chores admin CRUD (e2e)', () => {
 
   describe('DELETE /cleaning/chores/:choreId', () => {
     it('deletes a chore and cascades its completions', async () => {
-      const chore = await prisma.chore.create({ data: validChore() });
+      const chore = await prisma.chore.create({ data: validChoreRow() });
       await prisma.choreCompletion.create({
         data: { choreId: chore.id, userId: firstUserId, isoWeek: '2024-W01' },
       });

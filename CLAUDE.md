@@ -367,15 +367,27 @@ npm run start:dev        # nest start --watch
 npm run build
 npm run start:prod
 npm run lint
+npm run typecheck        # tsc --noEmit — see below for why this exists separately
 npm run test              # jest, unit
 npm run test:e2e          # supertest against a real Nest app instance
 npx prisma migrate dev  # see Database's Migration history note before using this for real
 npx prisma generate
 ```
 
-Run `npm run test` (and `test:e2e` when routes changed) before considering
-work finished — there's no separate typecheck script; `nest build` is the
-type-checking step if needed ad hoc.
+Run `npm run typecheck` and `npm run test` (and `test:e2e` when routes
+changed) before considering work finished. Neither `nest build` nor a
+passing test run can be trusted to catch a type error on their own:
+`nest build` compiles from `tsconfig.build.json`, which excludes `test/`
+and every `*.spec.ts` entirely, so it never sees fixture/test code; and
+`tsconfig.json` sets `isolatedModules: true`, which puts ts-jest in
+transpile-only mode — each test file is compiled in isolation with no
+cross-file type-checking, so `npm test` passing is not evidence the test
+file itself type-checks. `npm run typecheck` (`tsc --noEmit` against the
+unrestricted `tsconfig.json`) is the only command that actually checks
+`src/` and `test/` together. A four-error mismatch between
+`chores.e2e-spec.ts`'s fixtures and Prisma's `AssignmentMode` enum sat
+unnoticed through the per-chore-configuration migration for exactly this
+reason before this script existed — run it.
 
 ## Git workflow
 
@@ -385,8 +397,9 @@ commit without asking each time, scoped to local commits only.
 - One commit per completed todo-list item, not per file and not batched across
   a whole feature. If a task wasn't broken into a todo list, commit once the
   discrete piece of work is done.
-- Run `npm run test` (and `npm run test:e2e` when routes changed) before
-  committing. Do not commit code that fails either.
+- Run `npm run typecheck` and `npm run test` (and `npm run test:e2e` when
+  routes changed) before committing. Do not commit code that fails any of
+  them.
 - A Prisma schema change and its generated migration folder belong in the
   **same commit** — never commit a `schema.prisma` edit without the migration
   it produced, or the next person's `prisma migrate dev` will diverge.
