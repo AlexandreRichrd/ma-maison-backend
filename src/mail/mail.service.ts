@@ -46,8 +46,15 @@ export class MailService {
     return new URL(path, base).toString();
   }
 
+  /** Same link sendInviteEmail() puts in the email — exposed so the
+   * household-bootstrap command can print it to stdout too, as a fallback
+   * if the mail is lost or lands in spam. */
+  registerLink(token: string): string {
+    return this.appUrl(`/register?token=${token}`);
+  }
+
   async sendInviteEmail(email: string, token: string): Promise<void> {
-    const link = this.appUrl(`/register?token=${token}`);
+    const link = this.registerLink(token);
     await this.send(
       email,
       'Invitation à rejoindre Hearth',

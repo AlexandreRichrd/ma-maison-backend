@@ -23,19 +23,45 @@ export class InvitesService {
       throw new ApiError(401, 'form', 'invalid_session');
     }
 
-    const invite = await this.prisma.invite.create({
+    const invite = await this.createInvite(
+      inviter.householdId,
+      invitedByUserId,
+      email,
+    );
+    await this.mail.sendInviteEmail(invite.email, invite.token);
+
+    return { ok: true };
+  }
+
+  /**
+   * Only for the household-bootstrap command: the one invite that has no
+   * signed-in inviter, because it's the very first one, issued against an
+   * empty database. `invitedByUserId` is nullable in the schema for
+   * exactly this case — see the Invite model.
+   */
+  async createBootstrap(
+    householdId: string,
+    email: string,
+  ): Promise<{ token: string }> {
+    const invite = await this.createInvite(householdId, null, email);
+    await this.mail.sendInviteEmail(invite.email, invite.token);
+    return { token: invite.token };
+  }
+
+  private createInvite(
+    householdId: string,
+    invitedByUserId: string | null,
+    email: string,
+  ) {
+    return this.prisma.invite.create({
       data: {
-        householdId: inviter.householdId,
+        householdId,
         invitedByUserId,
         email: email.trim(),
         token: generateToken(),
         expiresAt: new Date(Date.now() + INVITE_TTL_MS),
       },
     });
-
-    await this.mail.sendInviteEmail(invite.email, invite.token);
-
-    return { ok: true };
   }
 
   /**
