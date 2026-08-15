@@ -1,7 +1,13 @@
 import { Module } from '@nestjs/common';
 
-// No tables yet — reserved for upcoming IoT ingestion (sensor readings,
-// device registration). Scaffolded now so climate work has a home when it
-// starts.
-@Module({})
+import { ClimateController } from './climate.controller';
+import { ClimateService } from './climate.service';
+
+// Owns: measures (sensor readings ingested from the household's Pi bridge,
+// see intranet's pi/). Device registration is still unbuilt — see
+// CLAUDE.md's Not in scope yet.
+@Module({
+  controllers: [ClimateController],
+  providers: [ClimateService],
+})
 export class ClimateModule {}

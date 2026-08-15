@@ -221,6 +221,31 @@ model ChoreCompletion {
 }
 
 // ---------------------------------------------------------------------------
+// climate domain: measures
+// ---------------------------------------------------------------------------
+
+// One row per MQTT reading forwarded by the household's Pi bridge (separate
+// repo, see intranet's pi/ — not this API's concern how readings get
+// collected). A device that reports temperature and humidity together
+// produces two rows, not one wide row — type is a plain string rather than
+// a DB enum, so a new sensor kind is a new string value, not a migration.
+// Append-only — no updatedAt, rows are never modified after insert.
+model Measure {
+  id         String   @id @default(uuid()) @db.Uuid
+  deviceName String   @map("device_name")
+  type       String
+  value      String
+  // When the Pi read the value off MQTT, not when this row was inserted —
+  // the two can diverge if the Pi buffers offline (see pi/'s retention
+  // config) and forwards a backlog once connectivity returns.
+  recordedAt DateTime @map("recorded_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([deviceName, type, recordedAt])
+  @@map("measures")
+}
+
+// ---------------------------------------------------------------------------
 // reminders domain: reminders
 // ---------------------------------------------------------------------------
 

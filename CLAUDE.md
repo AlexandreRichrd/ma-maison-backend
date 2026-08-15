@@ -80,6 +80,10 @@ src/
     household-members.service.ts  # shared "ordered household members" query
   reminders/
     reminders.controller.ts
+  climate/
+    climate.controller.ts   # POST /climate/measures — device-token ingestion, see Climate
+    climate.service.ts
+    device-auth.guard.ts    # static bearer token, not user JWT — see Climate
   common/
     dto/                    # shared DTOs (pagination, etc.) if any emerge
     filters/                # exception filters -> consistent error shape
@@ -209,6 +213,33 @@ past ones — there's no history-preserving migration of old
   "jump columns" to the other person after an `assignmentMode`/
   `anchorUserId` edit. Documented behavior, not a bug to fix here.
 
+## Climate
+
+`POST /climate/measures` ingests sensor readings forwarded by the
+household's Pi bridge — a separate repo (`pi/`, sibling to this one and
+`my-home`) that subscribes to the `capteurs/#` MQTT topics `capteurs/`
+(also a sibling repo, ESPHome firmware) publishes to, keeps its own local
+SQLite history, and forwards batches here over HTTPS. This is the "upcoming
+IoT ingestion" `ClimateModule` was scaffolded for.
+
+- **Not user JWT auth.** The caller is a device on the household's home
+  LAN, not a signed-in person — the route is `@Public()` (opting out of the
+  global `JwtAuthGuard`) and instead guarded by `DeviceAuthGuard`, which
+  compares the `Authorization: Bearer <token>` header against
+  `CLIMATE_INGEST_TOKEN` (constant-time comparison) with no per-user
+  identity behind it
+- Body is `{ measures: [{ deviceName, type, value, recordedAt }] }`, capped
+  at 500 per request. `type` is an unvalidated string, not a fixed enum —
+  same reasoning as the `Measure` model (see Database): a new sensor kind
+  is a new string, not a migration or a DTO change
+- **Resolves the tunnel concern below**: this is the Pi *pushing* out to
+  the VPS over HTTPS, not the VPS reaching into the home LAN — no
+  Tailscale/WireGuard needed for ingestion itself. The dashboard's
+  home-climate widget is still hardcoded placeholder data, though — nothing
+  here wires it up to read from `measures` yet
+- Read endpoints (for the dashboard widget) aren't built yet — ingestion
+  only, so far
+
 ## Database
 
 Prisma schema at `prisma/schema.prisma`. Connection string in `DATABASE_URL`
@@ -229,6 +260,7 @@ is constructed — inject it, never `new PrismaClient()` elsewhere.
 | `chores` | name, frequency_weeks, assignment_mode (`ROTATING`\|`PINNED`), anchor_iso_week, anchor_user_id |
 | `chore_completions` | chore_id, user_id, iso_week, completed_at |
 | `reminders` | title, due_at, done_at nullable, assignee_ids (0-2, no FK — array column) |
+| `measures` | device_name, type, value (all text — see Climate), recorded_at, created_at. One row per metric, so a device reporting temperature and humidity together produces two rows |
 
 This is the same schema the old Drizzle setup used — port it into
 `schema.prisma` rather than redesigning it. Conventions:
@@ -512,13 +544,14 @@ the same Caddy instance.
   not a backup, and neither is a backup that lives on the box it's meant to
   protect against
 
-**Flagged, not yet a problem**: the dashboard's home-climate widget is
-currently hardcoded placeholder data in the frontend (no real weather API or
-indoor sensor wired up). If that becomes real, an *indoor* sensor reading
-implies this API needs to reach a device on the household's home LAN — and a
-VPS can't reach a private home IP directly. That would need a tunnel (e.g.
-Tailscale/WireGuard) between the VPS and the home network. Don't build that
-now; it's not needed until the widget stops being a placeholder.
+**Partially resolved**: the dashboard's home-climate widget is still
+hardcoded placeholder data in the frontend, but the tunnel concern this
+section used to flag is moot — see Climate. Indoor sensor readings now
+reach this API via the household's Pi bridge *pushing* batches to
+`POST /climate/measures` over HTTPS, so nothing here needs to reach into
+the home LAN the way a pull-based integration would have. What's still
+missing is a read endpoint and wiring the widget to it — not attempted
+here, since nothing asked for it yet.
 
 ## Not in scope yet
 
