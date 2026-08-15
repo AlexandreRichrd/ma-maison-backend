@@ -52,9 +52,13 @@ model User {
 }
 
 model Invite {
-  id              String    @id @default(uuid()) @db.Uuid
-  householdId     String    @map("household_id") @db.Uuid
-  invitedByUserId String    @map("invited_by_user_id") @db.Uuid
+  id          String    @id @default(uuid()) @db.Uuid
+  householdId String    @map("household_id") @db.Uuid
+  // Null only for the invite the bootstrap command issues against an empty
+  // database, before any user exists to be the inviter. Every other invite
+  // is created by InvitesService.create() on behalf of a signed-in user, so
+  // this stays non-null for the entire life of the app past that first row.
+  invitedByUserId String?   @map("invited_by_user_id") @db.Uuid
   email           String
   token           String    @unique
   expiresAt       DateTime  @map("expires_at") @db.Timestamptz(6)
@@ -63,7 +67,7 @@ model Invite {
   updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  invitedBy User      @relation(fields: [invitedByUserId], references: [id], onDelete: Cascade)
+  invitedBy User?     @relation(fields: [invitedByUserId], references: [id], onDelete: SetNull)
 
   @@map("invites")
 }
