@@ -404,6 +404,35 @@ setting — the From header is always built from `SMTP_USER`, since DMARC
 checks From against the authenticated sending mailbox and letting the two
 diverge is how mail lands in spam.
 
+### Bootstrapping the first account
+
+Registration is invite-gated (above), which is a chicken-and-egg problem for
+a brand new database: there's no signed-in user to issue the first invite.
+`src/bootstrap-household.ts` (run via `npm run bootstrap:household <email>`,
+or directly as `node dist/bootstrap-household.js <email>`) breaks that
+deadlock:
+
+- Creates the single `households` row, then calls
+  `InvitesService.createBootstrap()` — the same invite mechanism `POST
+  /invites` uses (same `invites` table, token generation, 7-day TTL, and
+  `MailService.sendInviteEmail()`), just with `invitedByUserId: null` since
+  no user exists yet to be the inviter. That's why `invites.invited_by_user_id`
+  is nullable in the schema — every other invite still sets it
+- From there it's the normal flow: `/register?token=…` on the frontend,
+  same as any other invite
+- Prints the invite link to stdout in addition to sending the email, so a
+  lost or spam-filtered email doesn't strand the operator
+- Refuses to run if a `households` row already exists (`HouseholdBootstrapService.bootstrap()`)
+  — this seeds an empty database once, it isn't a reset path
+- Runs via `NestFactory.createApplicationContext(BootstrapModule)`, not the
+  full `AppModule` — `BootstrapModule` only imports `PrismaModule` and
+  `MailModule` and declares `InvitesService` directly, skipping
+  `AuthModule`'s `JwtModule`/`PassportModule`/global guard setup, which the
+  script has no need for and which would otherwise require the JWT keypair
+  just to construct
+- Must run after migrations are applied and before anyone can log in — see
+  the top-level repo's Production (VPS) deploy notes for the exact command
+
 ### Forgot / reset password
 
 Registration is invite-gated, but recovery isn't: any signed-up user can
@@ -454,6 +483,7 @@ npm run test              # jest, unit
 npm run test:e2e          # supertest against a real Nest app instance
 npx prisma migrate dev  # see Database's Migration history note before using this for real
 npx prisma generate
+npm run bootstrap:household -- <email>  # one-off, empty database only — see Bootstrapping the first account
 ```
 
 Run `npm run typecheck` and `npm run test` (and `test:e2e` when routes
