@@ -58,4 +58,79 @@ describe('ClimateService', () => {
       expect(result).toEqual({ inserted: 1 });
     });
   });
+
+  describe('getCurrent', () => {
+    it('returns only the latest reading per device and type', async () => {
+      await climate.ingest([
+        {
+          deviceName: 'capteur-salon',
+          type: 'temperature',
+          value: '20.5',
+          recordedAt: '2026-08-15T09:00:00.000Z',
+        },
+        {
+          deviceName: 'capteur-salon',
+          type: 'temperature',
+          value: '21.3',
+          recordedAt: '2026-08-15T10:00:00.000Z',
+        },
+        {
+          deviceName: 'capteur-salon',
+          type: 'humidite',
+          value: '47.2',
+          recordedAt: '2026-08-15T10:00:00.000Z',
+        },
+      ]);
+
+      const rows = await climate.getCurrent();
+
+      expect(rows).toEqual([
+        {
+          deviceName: 'capteur-salon',
+          type: 'humidite',
+          value: '47.2',
+          recordedAt: new Date('2026-08-15T10:00:00.000Z'),
+        },
+        {
+          deviceName: 'capteur-salon',
+          type: 'temperature',
+          value: '21.3',
+          recordedAt: new Date('2026-08-15T10:00:00.000Z'),
+        },
+      ]);
+    });
+
+    it('filters out non-climate types like rssi, statut, and the ESPHome debug leak', async () => {
+      await climate.ingest([
+        {
+          deviceName: 'capteur-salon',
+          type: 'temperature',
+          value: '21.3',
+          recordedAt: '2026-08-15T10:00:00.000Z',
+        },
+        {
+          deviceName: 'capteur-salon',
+          type: 'rssi',
+          value: '-52',
+          recordedAt: '2026-08-15T10:00:00.000Z',
+        },
+        {
+          deviceName: 'capteur-salon',
+          type: 'statut',
+          value: 'en_ligne',
+          recordedAt: '2026-08-15T10:00:00.000Z',
+        },
+        {
+          deviceName: 'capteur-salon',
+          type: 'debug',
+          value: '[19:59:58][D][sensor:...',
+          recordedAt: '2026-08-15T10:00:00.000Z',
+        },
+      ]);
+
+      const rows = await climate.getCurrent();
+
+      expect(rows.map((r) => r.type)).toEqual(['temperature']);
+    });
+  });
 });

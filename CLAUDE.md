@@ -234,11 +234,20 @@ IoT ingestion" `ClimateModule` was scaffolded for.
   is a new string, not a migration or a DTO change
 - **Resolves the tunnel concern below**: this is the Pi *pushing* out to
   the VPS over HTTPS, not the VPS reaching into the home LAN — no
-  Tailscale/WireGuard needed for ingestion itself. The dashboard's
-  home-climate widget is still hardcoded placeholder data, though — nothing
-  here wires it up to read from `measures` yet
-- Read endpoints (for the dashboard widget) aren't built yet — ingestion
-  only, so far
+  Tailscale/WireGuard needed for ingestion itself
+- `GET /climate/current` is the read side, for the dashboard widget —
+  behind the global `JwtAuthGuard` like any other read endpoint (not
+  `@Public()`, unlike ingestion). Returns the latest reading per
+  `(deviceName, type)`, via Postgres `DISTINCT ON` (Prisma's `distinct` +
+  a matching `orderBy`), filtered to a hardcoded known-types list
+  (`temperature`, `humidite` — matching `capteur-salon.yaml`'s sensor
+  `state_topic`s). Filtering matters because the Pi's `capteurs/#`
+  subscription also picks up non-climate topics (`rssi`, `uptime`,
+  `statut`, and an ESPHome debug/log message that leaks through) that land
+  in the same `measures` table — see `ClimateService.getCurrent()`'s
+  comment. `my-home`'s dashboard widget is wired to this now (see its
+  `CLAUDE.md`'s Dashboard section) — indoor temperature/humidity are real,
+  outdoor is still a hardcoded placeholder pending an outdoor sensor
 
 ## Database
 
@@ -544,14 +553,13 @@ the same Caddy instance.
   not a backup, and neither is a backup that lives on the box it's meant to
   protect against
 
-**Partially resolved**: the dashboard's home-climate widget is still
-hardcoded placeholder data in the frontend, but the tunnel concern this
-section used to flag is moot — see Climate. Indoor sensor readings now
-reach this API via the household's Pi bridge *pushing* batches to
-`POST /climate/measures` over HTTPS, so nothing here needs to reach into
-the home LAN the way a pull-based integration would have. What's still
-missing is a read endpoint and wiring the widget to it — not attempted
-here, since nothing asked for it yet.
+**Resolved**: the tunnel concern this section used to flag is moot — see
+Climate. Indoor sensor readings reach this API via the household's Pi
+bridge *pushing* batches to `POST /climate/measures` over HTTPS, so
+nothing here needs to reach into the home LAN the way a pull-based
+integration would have. `GET /climate/current` now serves the dashboard's
+home-climate widget in `my-home`, indoor readings only — outdoor is still
+a hardcoded frontend placeholder pending a real outdoor sensor.
 
 ## Not in scope yet
 

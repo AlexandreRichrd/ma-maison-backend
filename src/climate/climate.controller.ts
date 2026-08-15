@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 
 import { Public } from '../auth/public.decorator';
 import { ClimateService } from './climate.service';
@@ -17,5 +17,12 @@ export class ClimateController {
   @Post('measures')
   ingest(@Body() dto: IngestMeasuresDto) {
     return this.climate.ingest(dto.measures);
+  }
+
+  // No @Public() — this is for the signed-in dashboard, covered by the
+  // global JwtAuthGuard like every other read endpoint.
+  @Get('current')
+  getCurrent() {
+    return this.climate.getCurrent();
   }
 }
