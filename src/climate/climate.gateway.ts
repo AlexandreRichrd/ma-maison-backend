@@ -45,8 +45,17 @@ export class ClimateGateway
 
   // socket.io only authenticates at handshake (WsAuthAdapter) — a
   // connection otherwise stays open indefinitely after its token expires.
-  // Disconnect it once that happens; the client's automatic reconnection
-  // redoes the handshake with whatever cookie it has by then.
+  // Disconnect it once that happens. client.disconnect(true) is a
+  // server-initiated close, which socket.io-client reports client-side as
+  // reason "io server disconnect" — a reason it deliberately does NOT
+  // auto-reconnect from (by design: see Socket.ondisconnect() in
+  // socket.io-client's source). my-home's climate-socket.client.ts
+  // specifically branches on that reason to force a loader revalidation
+  // instead, which is what actually gets the user back to a working state
+  // (a fresh login) since the same expired cookie would just be rejected
+  // again on any retry. This handler is the only thing that calls
+  // socket.disconnect(true) today — if that ever changes, whatever else
+  // calls it will hit the same client-side branch and log the user out.
   handleConnection(client: Socket) {
     const { tokenExp } = client.data as ClimateSocketData;
     const msUntilExpiry = tokenExp * 1000 - Date.now();
