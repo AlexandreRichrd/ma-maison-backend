@@ -1,17 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { MeasureDto } from './dto/ingest-measures.dto';
-
-// The Pi's capteurs/# MQTT subscription also picks up non-climate topics
-// (rssi, uptime, statut, and an ESPHome debug/log message that leaks
-// through) — see capteurs/README.md's Sujets MQTT and pi/main.py's
-// parse_topic(). Those land in the same `measures` table as everything
-// else ingested (type is intentionally not a DB enum, see the Measure
-// model), so the read side filters to the two metrics the ESPHome config
-// actually publishes as sensor state (capteur-salon.yaml's `temperature`/
-// `humidite` state_topics) rather than trusting whatever `type` shows up.
-const KNOWN_MEASURE_TYPES = ['temperature', 'humidite'] as const;
+import { MeasuresIngestedEvent } from './events/measures-ingested.event';
+import { KNOWN_MEASURE_TYPES } from './known-measure-types';
 
 export type CurrentReading = {
   deviceName: string;
@@ -22,7 +15,10 @@ export type CurrentReading = {
 
 @Injectable()
 export class ClimateService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly events: EventEmitter2,
+  ) {}
 
   async ingest(measures: MeasureDto[]): Promise<{ inserted: number }> {
     const result = await this.prisma.measure.createMany({
@@ -33,6 +29,17 @@ export class ClimateService {
         recordedAt: new Date(measure.recordedAt),
       })),
     });
+
+    // Fired after the batch is durably persisted, not before — a listener
+    // (ClimateGateway) reacting to this should never be able to broadcast
+    // a measurement this service failed to save. No direct dependency on
+    // the gateway/websockets module: this service doesn't know or care
+    // whether anything is listening.
+    this.events.emit(
+      'climate.measures.ingested',
+      new MeasuresIngestedEvent(measures),
+    );
+
     return { inserted: result.count };
   }
 

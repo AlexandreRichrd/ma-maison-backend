@@ -1,8 +1,11 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
+
 import { PrismaService } from '../prisma/prisma.service';
 import { ClimateService } from './climate.service';
 
 describe('ClimateService', () => {
   let prisma: PrismaService;
+  let events: EventEmitter2;
   let climate: ClimateService;
 
   beforeAll(() => {
@@ -15,7 +18,8 @@ describe('ClimateService', () => {
 
   beforeEach(async () => {
     await prisma.$executeRaw`TRUNCATE measures RESTART IDENTITY CASCADE`;
-    climate = new ClimateService(prisma);
+    events = new EventEmitter2();
+    climate = new ClimateService(prisma, events);
   });
 
   describe('ingest', () => {
@@ -56,6 +60,26 @@ describe('ClimateService', () => {
       ]);
 
       expect(result).toEqual({ inserted: 1 });
+    });
+
+    it('emits climate.measures.ingested with the batch after it is persisted', async () => {
+      const listener = jest.fn();
+      events.on('climate.measures.ingested', listener);
+
+      const measures = [
+        {
+          deviceName: 'capteur-salon',
+          type: 'temperature',
+          value: '21.3',
+          recordedAt: '2026-08-15T10:00:00.000Z',
+        },
+      ];
+      await climate.ingest(measures);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ measures }),
+      );
     });
   });
 
