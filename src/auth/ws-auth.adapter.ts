@@ -69,7 +69,10 @@ export class WsAuthAdapter extends IoAdapter {
         }
 
         (socket.data as ClimateSocketData).tokenExp = payload.exp;
-        void socket.join(`household:${user.householdId}`);
+        // Awaited, not fire-and-forget: the in-memory adapter joins
+        // synchronously, but this shouldn't assume that of every adapter —
+        // next() must not run before room membership actually takes effect.
+        await socket.join(`household:${user.householdId}`);
         next();
       })();
     });

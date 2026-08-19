@@ -12,6 +12,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { selectBroadcast } from './broadcast-selection';
 import type { MeasuresIngestedEvent } from './events/measures-ingested.event';
 
+// Node's setTimeout delay is a 32-bit signed int internally — see
+// scheduleExpiryDisconnect's comment.
+const MAX_SET_TIMEOUT_MS = 2 ** 31 - 1;
+
 /**
  * Pushes live climate readings to the dashboard widget. No dependency on
  * ClimateService or the ingestion controller — it only reacts to
@@ -58,10 +62,31 @@ export class ClimateGateway
   // calls it will hit the same client-side branch and log the user out.
   handleConnection(client: Socket) {
     const { tokenExp } = client.data as ClimateSocketData;
+    this.scheduleExpiryDisconnect(client, tokenExp);
+  }
+
+  // setTimeout's delay is a 32-bit signed int — anything past ~24.8 days
+  // silently overflows and fires almost immediately instead (Node logs a
+  // TimeoutOverflowWarning and clamps it to 1ms). JWT_EXPIRES_IN defaults
+  // to 30 days (see my-home-backend/CLAUDE.md's Authentication section),
+  // so a naive single setTimeout(msUntilExpiry) disconnected every socket
+  // within ~1ms of connecting whenever that default was in play — caught
+  // by testing against a real 30-day-lived token, not the short TTLs a
+  // faster manual test reaches for. Chains timers under the cap instead,
+  // recomputing the remainder from the wall clock each hop so drift
+  // across days-long chains doesn't accumulate.
+  private scheduleExpiryDisconnect(client: Socket, tokenExp: number) {
     const msUntilExpiry = tokenExp * 1000 - Date.now();
+    const delay = Math.min(Math.max(msUntilExpiry, 0), MAX_SET_TIMEOUT_MS);
     this.expiryTimers.set(
       client.id,
-      setTimeout(() => client.disconnect(true), Math.max(msUntilExpiry, 0)),
+      setTimeout(() => {
+        if (msUntilExpiry > MAX_SET_TIMEOUT_MS) {
+          this.scheduleExpiryDisconnect(client, tokenExp);
+        } else {
+          client.disconnect(true);
+        }
+      }, delay),
     );
   }
 
