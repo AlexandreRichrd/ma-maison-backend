@@ -74,9 +74,9 @@ src/
     recipes.service.ts
     ingredients.ts              # name normalisation — pure, unit-tested
   cleaning/
-    cleaning.controller.ts      # GET /cleaning?week=2026-W32
+    cleaning.controller.ts      # GET /cleaning/week?week=2026-W32, GET /cleaning/day?date=2026-08-20
     rotation.service.ts           # pure chore-rotation function, heavily tested
-    chores.controller.ts          # admin CRUD: add/edit/remove chores
+    chores.controller.ts          # admin CRUD: add/edit/remove chores + subtasks
     household-members.service.ts  # shared "ordered household members" query
   reminders/
     reminders.controller.ts
@@ -126,23 +126,33 @@ Never scatter this logic across controllers or services.
 
 A chore's config (`chores` table — see Database) is:
 
-- `frequencyWeeks` — 1 = weekly, N = occurs every N weeks. A chore with
-  `frequencyWeeks > 1` does not occur at all on its off-weeks: it isn't
-  returned by `GET /cleaning`, isn't assigned to anyone, and toggling its
-  completion on an off-week is rejected (`chore_not_scheduled`, 409). This
-  is a deliberate property, not a gap — "biweekly" means *absent* every
-  other week, not "present every week with the assignee swapping."
-- `anchorIsoWeek` — the ISO week (`2026-W32`) this chore first occurred.
-  Every later occurrence is derived from this: `isoWeek` is an occurrence
-  iff it's on-or-after the anchor and `(isoWeek - anchorIsoWeek)` in weeks
-  is a multiple of `frequencyWeeks`. Nothing else is stored about the
-  schedule — changing `frequencyWeeks` or `anchorIsoWeek` immediately
-  redefines every past and future occurrence.
+- `frequencyUnit` (`DAY` | `WEEK`) and `frequencyValue` (positive int) —
+  together, "occurs every N days" or "occurs every N weeks" (1 = daily/
+  weekly, N = every N days/weeks). Both fields are **always** populated —
+  never modeled as two mutually exclusive nullable columns. A chore that
+  doesn't occur on a given day isn't returned by `GET /cleaning/day` or
+  `GET /cleaning/week`, isn't assigned to anyone, and toggling its
+  completion that day is rejected (`chore_not_scheduled`, 409). This is a
+  deliberate property, not a gap — "biweekly" means *absent* every other
+  week, not "present every week with the assignee swapping."
+- `anchorDate` — the calendar date this chore first occurred. Every later
+  occurrence is derived from this: with `periodDays = frequencyUnit ===
+  'WEEK' ? frequencyValue * 7 : frequencyValue`, a date is an occurrence
+  iff it's on-or-after the anchor and `(date - anchorDate)` in days is a
+  multiple of `periodDays`. Nothing else is stored about the schedule —
+  changing `frequencyUnit`/`frequencyValue`/`anchorDate` immediately
+  redefines every past and future occurrence. For `frequencyUnit=WEEK`,
+  `anchorDate` **must** be a Monday — `ChoresService` rejects a non-Monday
+  anchor with `anchor_date_not_monday` (checked against the *effective*
+  post-update value, since either field can be omitted on a `PATCH`),
+  otherwise the chore would drift out of alignment with the weekly block.
+  No such constraint for `frequencyUnit=DAY` — any calendar date is a
+  valid daily anchor.
 - `assignmentMode` — `ROTATING` or `PINNED`.
 - `anchorUserId` — dual meaning depending on `assignmentMode`: for
   `PINNED`, the permanent assignee, full stop; for `ROTATING`, who was
-  assigned on the chore's anchor week (its 0th occurrence) — assignment
-  alternates from there, one flip per *occurrence*, not per calendar week
+  assigned on the chore's anchor date (its 0th occurrence) — assignment
+  alternates from there, one flip per *occurrence*, not per calendar unit
   (so a biweekly rotating chore alternates every other week, in step with
   its own occurrences, not every week). Two rotating chores are entirely
   independent — there is no cross-chore "opposite person" constraint the
@@ -152,66 +162,145 @@ A chore's config (`chores` table — see Database) is:
 Rules:
 
 - Signatures, both on `RotationService`:
-  - `getChoreAssignment(isoWeek: string, chore: ChoreConfig, users: [RotationUser, RotationUser]): { userId: string } | null`
-    — `null` means the chore does not occur that week
-  - `getWeekOccurrences(isoWeek: string, chores: ChoreConfig[], users: [RotationUser, RotationUser]): { choreId: string; userId: string }[]`
-    — a pure filter/map over the above, only the chores that occur
+  - `getChoreAssignment(date: Date, chore: ChoreConfig, users: [RotationUser, RotationUser]): { userId: string } | null`
+    — `null` means the chore does not occur on that date
+  - `getOccurrences(from: Date, to: Date, chores: ChoreConfig[], users: [RotationUser, RotationUser]): { choreId: string; userId: string; occurrenceDate: Date }[]`
+    — a pure filter/map over the above across an inclusive date range,
+    only the chores that occur on some day within it. The weekly block
+    and the day navigator (see UI, in `my-home/CLAUDE.md`) are both just
+    callers with a different `from`/`to` — a single-day range for the day
+    view, a Monday-to-Monday range for the weekly block (a WEEK-unit
+    chore's occurrence, when it occurs at all, always lands exactly on
+    that Monday)
+  - `frequencyUnit` is branched on in exactly one place —
+    `periodDaysFor()` — never anywhere else in this file; every day-vs-
+    week difference collapses to a single days-based formula past that
+    point
   - the `[RotationUser, RotationUser]` tuple is load-bearing: this is only
     defined for two people. If the household ever has a third+ member
     (possible now via invites, see Authentication), calling this needs a
     redesign first; don't paper over it with `users[0]`/`users[1]` slicing
   - both throw a plain `Error` (not an `ApiError`) if `anchorUserId`
-    matches neither user, or `frequencyWeeks` isn't a positive integer —
+    matches neither user, or `frequencyValue` isn't a positive integer —
     these are invariants `ChoresService` must enforce on create/update,
     not input either function should have to defend against at call time
-- **Pure and deterministic** — same week + chore config in, same result
+- **Pure and deterministic** — same date + chore config in, same result
   out, no database access. A Prisma `Chore` row satisfies `ChoreConfig`
   structurally, so callers pass rows straight through with no mapping step
 - Assignments are never written to the database. Only *completions* are stored
 - User order is stable, from `households.member_order` (an array of user
   ids), via the shared `HouseholdMembersService`. Rotation does not scramble
   if a row's `created_at` changes
+- **Every date this app treats as a calendar date is UTC midnight,
+  always** — via a hand-rolled `Date.UTC(...)`-based day arithmetic in
+  `rotation.service.ts` and `src/cleaning/iso-date.util.ts`'s
+  `parseIsoDate`/`isoDayOfWeekUtc`/`formatIsoDateUtc`, never date-fns's
+  `parseISO` (parses a bare `'YYYY-MM-DD'` as *local* midnight, not UTC —
+  a real bug caught while building this: it silently shifted `anchorDate`
+  by a day on any host not running in UTC) or its local-time helpers
+  (`getISODay`, `eachDayOfInterval`, `differenceInCalendarDays`). The `pg`
+  driver adapter (`@prisma/adapter-pg`) reads/writes `@db.Date` columns
+  using UTC components, so this isn't a style preference — mixing local-
+  and UTC-based date handling anywhere in this module reintroduces the
+  same class of bug. `iso-week.util.ts`'s `parseIsoWeek` (ISO week ->
+  Monday) is likewise a hand-rolled UTC calculation, not date-fns's
+  `setISOWeek`/`startOfISOWeek`, for the same reason.
 
-Test past, current, and future weeks plus the year boundary — ISO weeks do
-not align with calendar years. Use `date-fns`
-(`differenceInCalendarISOWeeks`, `parseISO`), never a hand-rolled division
-by 7.
+Test past, current, and future occurrences plus the year boundary — ISO
+weeks do not align with calendar years.
 
-`GET /cleaning?week=2026-W32` returns the computed occurrences, grouped by
-user and merged with that week's stored completions — the frontend never
-computes rotation itself. Both users are always present in the response,
-even with an empty `chores` array for one of them (e.g. every chore that
-week landed on the other person, or nothing occurs at all).
+`GET /cleaning/week?week=2026-W32` returns `WEEK`-unit chores only,
+grouped by user and merged with that week's stored completions —
+`DAY`-unit chores never appear here. `GET /cleaning/day?date=2026-08-20`
+is the mirror image: `DAY`-unit chores only, for that single date,
+`WEEK`-unit chores never appear. Neither endpoint computes rotation
+client-side; the frontend never re-derives it either. Both users are
+always present in the response, even with an empty `chores` array for one
+of them (e.g. every chore that period landed on the other person, nothing
+occurs at all, or the requested date/week precedes every chore's
+`anchorDate`). Each returned chore carries its own `occurrenceDate`
+(`'YYYY-MM-DD'`) so the frontend never has to compute or assume it — for
+a `WEEK`-unit chore this is always the Monday of the requested week.
 
 `GET/POST /cleaning/chores` and `PATCH/DELETE /cleaning/chores/:choreId`
 (alongside the existing toggle route) are the admin CRUD for chore configs
 — see `ChoresService`. `anchorUserId` is validated against the caller's
 household there (a DB lookup, so it can't live in the DTO), reusing the
 `invalid_id` code `RemindersService` already uses for the same "referenced
-user id doesn't check out" shape.
+user id doesn't check out" shape. Every chore in these responses also
+carries its `subtasks`, ordered by `position` (see Subtasks below).
+
+### Subtasks
+
+A chore can optionally carry subtasks (`chore_subtasks` table — see
+Database), each just a `label` and a `position`. Subtasks inherit
+everything from their parent chore — no frequency, no assignee of their
+own. Admin CRUD (`ChoreSubtasksService`, routes nested under
+`/cleaning/chores/:choreId/subtasks`) supports add/edit/delete/reorder;
+`reorder` takes the full ordered id list (position is derived from array
+index) and rejects a set that doesn't exactly match the chore's current
+subtasks. Its route is declared **before** the parameterized
+`:choreId/subtasks/:subtaskId` route in `ChoresController` — Nest/Express
+match routes in declaration order, so `reorder` would otherwise be
+swallowed as a literal `subtaskId` (covered by an e2e regression test).
+
+Completion rules, all enforced in `CleaningService`, never left to the
+frontend to derive:
+
+- **A chore is complete iff every one of its subtasks is complete.** For
+  a chore with zero subtasks this is unchanged from before (a single
+  completion row, `subtaskId` null). For a chore *with* subtasks, "the
+  whole chore is done" is never itself a stored completion row — it's
+  always computed from whether every current subtask has one.
+- **Ticking the parent ticks every subtask** — `toggleCompletion` on a
+  chore with subtasks creates a completion for every not-yet-completed
+  subtask in one transaction (mirroring `addIngredientsToList`'s
+  single-transaction requirement). Toggling it again (now fully done)
+  removes every subtask's completion together.
+- **Unticking any subtask unticks the parent** — this needs no extra
+  code, since "done" is always derived from the current subtask set, not
+  a separately stored parent flag.
+- Both the parent-level and per-subtask toggle (`PATCH
+  /cleaning/chores/:choreId/subtasks/:subtaskId/toggle`) skip the
+  `chore_not_scheduled` schedule check when only *removing* completions —
+  same stale-completion allowance as the no-subtask case below — and only
+  enforce it when a toggle would *create* one.
+- **Accepted tradeoff**: adding a subtask to a chore that already has
+  completion history retroactively un-completes every past occurrence
+  that isn't complete under the *new* subtask set (the new subtask has no
+  historical completion rows); deleting a subtask can conversely complete
+  previously-incomplete occurrences. This is the direct, deliberate
+  consequence of deriving "done" from the *current* subtask set rather
+  than snapshotting it per occurrence — same category of tradeoff as
+  editing a chore's schedule below, and not scoped by subtask creation
+  date for the same reason: that would mean tracking, per occurrence,
+  which subtasks existed *at the time*, turning subtasks into their own
+  versioned schedule.
 
 ### Editing a chore's schedule after completions already exist
 
-Editing `frequencyWeeks`/`anchorIsoWeek`/`assignmentMode` on an existing
-chore redefines what "on"/"off" and "who" mean for *every* week, including
-past ones — there's no history-preserving migration of old
-`chore_completions` rows when this happens, and none is attempted:
+Editing `frequencyUnit`/`frequencyValue`/`anchorDate`/`assignmentMode` on
+an existing chore redefines what "on"/"off" and "who" mean for *every*
+occurrence, including past ones — there's no history-preserving migration
+of old `chore_completions` rows when this happens, and none is attempted:
 
-- A completion for a week that no longer satisfies the new schedule isn't
-  deleted. It just becomes permanently unreachable through the API:
-  `getWeekOccurrences` stops emitting that chore for that week, so
-  `GET /cleaning` never surfaces it and `toggleCompletion` 409s
-  (`chore_not_scheduled`) if something still tries to touch it. The row
-  sits there, inert but harmless, and still cascades if the chore itself
-  is deleted.
+- A completion for an occurrence that no longer satisfies the new
+  schedule isn't deleted. It just becomes permanently unreachable through
+  the API: `getOccurrences` stops emitting that chore for that date, so
+  neither `GET /cleaning/week` nor `GET /cleaning/day` ever surfaces it,
+  and `toggleCompletion`/the subtask toggle still let it be *removed*
+  (the stale-completion allowance above) but 409 (`chore_not_scheduled`)
+  on any attempt to *create* a new one there. The row sits there, inert
+  but harmless, and still cascades if the chore itself is deleted.
 - The *displayed* assignee can diverge from who actually completed it —
   this predates chores being editable, it's just newly reachable now.
-  `getWeek()`'s grouping only ever checks *whether* a completion exists for
-  `(choreId, isoWeek)`; it never reads the completion's stored `userId`
-  back for placement. The checkbox renders under whoever the *current*
-  config assigns that week, so a previously-completed chore can visibly
-  "jump columns" to the other person after an `assignmentMode`/
-  `anchorUserId` edit. Documented behavior, not a bug to fix here.
+  The grouping in `CleaningService` only ever checks *whether* a
+  completion exists for `(choreId, subtaskId, occurrenceDate)`; it never
+  reads the completion's stored `userId` back for placement. The
+  checkbox renders under whoever the *current* config assigns that
+  occurrence, so a previously-completed chore can visibly "jump columns"
+  to the other person after an `assignmentMode`/`anchorUserId` edit.
+  Documented behavior, not a bug to fix here.
 
 ## Climate
 
@@ -266,8 +355,9 @@ is constructed — inject it, never `new PrismaClient()` elsewhere.
 | `shopping_items` | list_id, name, quantity, unit, checked, source_recipe_id nullable |
 | `recipes` | name, servings, instructions |
 | `recipe_ingredients` | recipe_id, name, quantity, unit, position |
-| `chores` | name, frequency_weeks, assignment_mode (`ROTATING`\|`PINNED`), anchor_iso_week, anchor_user_id |
-| `chore_completions` | chore_id, user_id, iso_week, completed_at |
+| `chores` | name, frequency_unit (`DAY`\|`WEEK`), frequency_value, assignment_mode (`ROTATING`\|`PINNED`), anchor_date, anchor_user_id |
+| `chore_subtasks` | chore_id, label, position |
+| `chore_completions` | chore_id, user_id, subtask_id nullable, occurrence_date, completed_at |
 | `reminders` | title, due_at, done_at nullable, assignee_ids (0-2, no FK — array column) |
 | `measures` | device_name, type, value (all text — see Climate), recorded_at, created_at. One row per metric, so a device reporting temperature and humidity together produces two rows |
 
@@ -278,9 +368,15 @@ This is the same schema the old Drizzle setup used — port it into
   Prisma's `uuid()` default — pick one and use it everywhere)
 - `created_at` / `updated_at` are `@db.Timestamptz`, not plain `timestamp`
 - Chore *assignment* is computed by `rotation.service.ts` from each chore's
-  own `frequency_weeks`/`assignment_mode`/`anchor_iso_week`/`anchor_user_id`
-  — never stored. Only completions are persisted, keyed by
-  `(chore_id, iso_week)` with a unique constraint
+  own `frequency_unit`/`frequency_value`/`assignment_mode`/`anchor_date`/
+  `anchor_user_id` — never stored. Only completions are persisted, keyed by
+  `(chore_id, subtask_id, occurrence_date)` — `subtask_id` nullable (null
+  for a chore with no subtasks). Since Postgres treats every `NULL` as
+  distinct in a normal unique index, the real uniqueness guarantee is two
+  hand-written *partial* unique indexes, one per case, not a single
+  `@@unique` (which schema.prisma still can't express for the partial
+  case) — deliberate schema.prisma/DB drift, see the Migration history
+  note below
 - `chores.anchor_user_id` is `onDelete: Restrict`, not `Cascade` — a chore
   config is household-level, not the anchor user's own data; it shouldn't
   vanish (or drag its completion history down with it) if a remove-user

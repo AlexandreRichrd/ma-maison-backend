@@ -239,22 +239,40 @@ model ChoreSubtask {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  chore Chore @relation(fields: [choreId], references: [id], onDelete: Cascade)
+  chore       Chore             @relation(fields: [choreId], references: [id], onDelete: Cascade)
+  completions ChoreCompletion[]
 
   @@map("chore_subtasks")
 }
 
 model ChoreCompletion {
-  id          String   @id @default(uuid()) @db.Uuid
-  choreId     String   @map("chore_id") @db.Uuid
-  userId      String   @map("user_id") @db.Uuid
-  isoWeek     String   @map("iso_week")
-  completedAt DateTime @default(now()) @map("completed_at") @db.Timestamptz(6)
+  id      String  @id @default(uuid()) @db.Uuid
+  choreId String  @map("chore_id") @db.Uuid
+  userId  String  @map("user_id") @db.Uuid
+  // NULL for a chore with no subtasks (current/original behaviour) — a
+  // chore with subtasks has one completion row per subtask, never a
+  // parent-level row of its own; "the whole chore is done" is always
+  // derived (see cleaning.service.ts), not stored.
+  subtaskId String? @map("subtask_id") @db.Uuid
+  // The calendar date the occurrence starts, anchor-aligned — NOT the
+  // date the user happened to tick the box. For a WEEK-unit chore this is
+  // always a Monday (the only date rotation.service.ts ever computes an
+  // occurrence for).
+  occurrenceDate DateTime @map("occurrence_date") @db.Date
+  completedAt    DateTime @default(now()) @map("completed_at") @db.Timestamptz(6)
 
-  chore Chore @relation(fields: [choreId], references: [id], onDelete: Cascade)
-  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chore   Chore         @relation(fields: [choreId], references: [id], onDelete: Cascade)
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subtask ChoreSubtask? @relation(fields: [subtaskId], references: [id], onDelete: Cascade)
 
-  @@unique([choreId, isoWeek])
+  // The *real* uniqueness guarantee is two hand-written partial unique
+  // indexes (chore_id, occurrence_date) WHERE subtask_id IS NULL and
+  // (chore_id, subtask_id, occurrence_date) WHERE subtask_id IS NOT NULL —
+  // see …_rekey_chore_completions_drop_iso_week's migration.sql. A single
+  // @@unique here can't express "unique treating NULL as a real value",
+  // and Prisma's schema DSL has no partial-index syntax, so this is
+  // deliberate, documented schema.prisma/DB drift (same precedent as the
+  // Migration history note in CLAUDE.md).
   @@map("chore_completions")
 }
 

@@ -1,6 +1,6 @@
 import { IsIsoWeek } from './is-iso-week.decorator';
 
-export class GetCleaningQueryDto {
+export class GetCleaningWeekQueryDto {
   @IsIsoWeek()
   week!: string;
 }

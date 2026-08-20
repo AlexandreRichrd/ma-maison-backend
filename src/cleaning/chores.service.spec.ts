@@ -252,7 +252,11 @@ describe('ChoresService', () => {
         anchorUserId: first.id,
       });
       await prisma.choreCompletion.create({
-        data: { choreId: chore.id, userId: first.id, isoWeek: '2024-W01' },
+        data: {
+          choreId: chore.id,
+          userId: first.id,
+          occurrenceDate: new Date('2024-01-01'),
+        },
       });
 
       await chores.remove(chore.id);

@@ -316,7 +316,11 @@ describe('Chores admin CRUD (e2e)', () => {
     it('deletes a chore and cascades its completions', async () => {
       const chore = await prisma.chore.create({ data: validChoreRow() });
       await prisma.choreCompletion.create({
-        data: { choreId: chore.id, userId: firstUserId, isoWeek: '2024-W01' },
+        data: {
+          choreId: chore.id,
+          userId: firstUserId,
+          occurrenceDate: new Date('2024-01-01'),
+        },
       });
 
       await request(app.getHttpServer())

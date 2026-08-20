@@ -1,6 +1,6 @@
 import { IsIsoDate } from './is-iso-date.decorator';
 
-export class ToggleChoreDto {
+export class GetCleaningDayQueryDto {
   @IsIsoDate()
-  occurrenceDate!: string;
+  date!: string;
 }

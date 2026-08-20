@@ -35,3 +35,12 @@ export function isoDayOfWeekUtc(date: Date): number {
   const day = date.getUTCDay();
   return day === 0 ? 7 : day;
 }
+
+/** The inverse of parseIsoDate — 'YYYY-MM-DD' from a UTC-midnight Date's
+ * UTC components, never local ones (same reasoning throughout this file). */
+export function formatIsoDateUtc(date: Date): string {
+  const year = String(date.getUTCFullYear()).padStart(4, '0');
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
