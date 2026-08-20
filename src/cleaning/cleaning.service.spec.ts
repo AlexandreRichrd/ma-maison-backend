@@ -80,9 +80,10 @@ describe('CleaningService', () => {
       const kitchen = await prisma.chore.create({
         data: {
           name: 'Cuisine',
-          frequencyWeeks: 1,
+          frequencyUnit: 'WEEK',
+          frequencyValue: 1,
           assignmentMode: 'ROTATING',
-          anchorIsoWeek: '2024-W01',
+          anchorDate: new Date('2024-01-01'),
           anchorUserId: first.id,
         },
       });
@@ -96,7 +97,13 @@ describe('CleaningService', () => {
       expect(result.map((r) => r.user.id)).toEqual([first.id, second.id]);
       const firstEntry = result.find((r) => r.user.id === first.id);
       expect(firstEntry?.chores).toEqual([
-        { id: kitchen.id, name: 'Cuisine', frequencyWeeks: 1, done: true },
+        {
+          id: kitchen.id,
+          name: 'Cuisine',
+          frequencyUnit: 'WEEK',
+          frequencyValue: 1,
+          done: true,
+        },
       ]);
       const secondEntry = result.find((r) => r.user.id === second.id);
       expect(secondEntry?.chores).toEqual([]);
@@ -109,9 +116,10 @@ describe('CleaningService', () => {
       await prisma.chore.create({
         data: {
           name: 'Some day',
-          frequencyWeeks: 1,
+          frequencyUnit: 'WEEK',
+          frequencyValue: 1,
           assignmentMode: 'ROTATING',
-          anchorIsoWeek: '2030-W01',
+          anchorDate: new Date('2029-12-31'),
           anchorUserId: first.id,
         },
       });
@@ -130,9 +138,10 @@ describe('CleaningService', () => {
       const sheets = await prisma.chore.create({
         data: {
           name: 'Draps',
-          frequencyWeeks: 2,
+          frequencyUnit: 'WEEK',
+          frequencyValue: 2,
           assignmentMode: 'ROTATING',
-          anchorIsoWeek: '2024-W01',
+          anchorDate: new Date('2024-01-01'),
           anchorUserId: first.id,
         },
       });
@@ -153,9 +162,10 @@ describe('CleaningService', () => {
       await prisma.chore.create({
         data: {
           name: 'Poubelles',
-          frequencyWeeks: 1,
+          frequencyUnit: 'WEEK',
+          frequencyValue: 1,
           assignmentMode: 'PINNED',
-          anchorIsoWeek: '2024-W01',
+          anchorDate: new Date('2024-01-01'),
           anchorUserId: second.id,
         },
       });
@@ -193,9 +203,10 @@ describe('CleaningService', () => {
       const kitchen = await prisma.chore.create({
         data: {
           name: 'Cuisine',
-          frequencyWeeks: 1,
+          frequencyUnit: 'WEEK',
+          frequencyValue: 1,
           assignmentMode: 'ROTATING',
-          anchorIsoWeek: '2024-W01',
+          anchorDate: new Date('2024-01-01'),
           anchorUserId: first.id,
         },
       });
@@ -215,9 +226,10 @@ describe('CleaningService', () => {
       const kitchen = await prisma.chore.create({
         data: {
           name: 'Cuisine',
-          frequencyWeeks: 1,
+          frequencyUnit: 'WEEK',
+          frequencyValue: 1,
           assignmentMode: 'ROTATING',
-          anchorIsoWeek: '2024-W01',
+          anchorDate: new Date('2024-01-01'),
           anchorUserId: first.id,
         },
       });
@@ -238,9 +250,10 @@ describe('CleaningService', () => {
       const sheets = await prisma.chore.create({
         data: {
           name: 'Draps',
-          frequencyWeeks: 2,
+          frequencyUnit: 'WEEK',
+          frequencyValue: 2,
           assignmentMode: 'ROTATING',
-          anchorIsoWeek: '2024-W01',
+          anchorDate: new Date('2024-01-01'),
           anchorUserId: first.id,
         },
       });
@@ -261,9 +274,10 @@ describe('CleaningService', () => {
       const sheets = await prisma.chore.create({
         data: {
           name: 'Draps',
-          frequencyWeeks: 2,
+          frequencyUnit: 'WEEK',
+          frequencyValue: 2,
           assignmentMode: 'ROTATING',
-          anchorIsoWeek: '2024-W01',
+          anchorDate: new Date('2024-01-01'),
           anchorUserId: first.id,
         },
       });

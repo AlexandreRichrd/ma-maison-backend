@@ -1,9 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { differenceInCalendarISOWeeks } from 'date-fns';
-
-import { parseIsoWeek } from './iso-week.util';
 
 export type ChoreAssignmentMode = 'ROTATING' | 'PINNED';
+export type ChoreFrequencyUnit = 'DAY' | 'WEEK';
 
 export type RotationUser = { id: string };
 
@@ -14,18 +12,24 @@ export type RotationUser = { id: string };
  */
 export type ChoreConfig = {
   id: string;
-  frequencyWeeks: number;
+  frequencyUnit: ChoreFrequencyUnit;
+  frequencyValue: number;
   assignmentMode: ChoreAssignmentMode;
-  // The ISO week (YYYY-Www) this chore first occurred — every later
-  // occurrence is derived from this, never a separately stored schedule.
-  anchorIsoWeek: string;
+  // The calendar date this chore first occurred — every later occurrence
+  // is derived from this, never a separately stored schedule.
+  anchorDate: Date;
   // Dual meaning by assignmentMode: for PINNED, the permanent assignee;
-  // for ROTATING, who was assigned on anchorIsoWeek (occurrence 0) — later
+  // for ROTATING, who was assigned on anchorDate (occurrence 0) — later
   // occurrences alternate from there.
   anchorUserId: string;
 };
 
 export type ChoreAssignment = { userId: string };
+export type ChoreOccurrence = {
+  choreId: string;
+  userId: string;
+  occurrenceDate: Date;
+};
 
 function resolveUsers(
   chore: ChoreConfig,
@@ -43,33 +47,61 @@ function resolveUsers(
   );
 }
 
+/** DAY -> every frequencyValue days, WEEK -> every frequencyValue*7 days.
+ * The only place frequencyUnit is branched on — everything downstream of
+ * this is a single, unit-agnostic days-based formula. */
+function periodDaysFor(chore: ChoreConfig): number {
+  return chore.frequencyUnit === 'WEEK'
+    ? chore.frequencyValue * 7
+    : chore.frequencyValue;
+}
+
+const MS_PER_DAY = 86_400_000;
+
+// UTC-explicit day arithmetic, deliberately not date-fns's
+// differenceInCalendarDays/eachDayOfInterval — those normalize to the
+// *local* timezone's midnight, which silently shifts the returned
+// occurrenceDate by the host's UTC offset (verified: on a UTC+1 host,
+// eachDayOfInterval({start: 2024-01-01T00:00Z}) starts one hour before —
+// 2023-12-31T23:00Z). anchorDate/occurrenceDate are calendar dates, not
+// instants, so they're always handled via their UTC Y/M/D components,
+// regardless of what timezone the process happens to run in.
+function utcDayNumber(date: Date): number {
+  return Math.floor(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) /
+      MS_PER_DAY,
+  );
+}
+
+function utcDateFromDayNumber(dayNumber: number): Date {
+  return new Date(dayNumber * MS_PER_DAY);
+}
+
 /**
- * Pure, deterministic per-chore rotation. Same isoWeek + chore config +
- * users in, same result out — no database access. Deciding *whether* and
- * *to whom* a chore is assigned this week is all this does; joining that
+ * Pure, deterministic per-chore rotation. Same date + chore config + users
+ * in, same result out — no database access. Deciding *whether* and *to
+ * whom* a chore is assigned on a given date is all this does; joining that
  * against completions is the caller's job.
  */
 @Injectable()
 export class RotationService {
-  /** null = the chore does not occur on isoWeek under its current config. */
+  /** null = the chore does not occur on `date` under its current config. */
   getChoreAssignment(
-    isoWeek: string,
+    date: Date,
     chore: ChoreConfig,
     users: [RotationUser, RotationUser],
   ): ChoreAssignment | null {
-    if (!Number.isInteger(chore.frequencyWeeks) || chore.frequencyWeeks < 1) {
+    if (!Number.isInteger(chore.frequencyValue) || chore.frequencyValue < 1) {
       throw new Error(
-        `Chore ${chore.id} has a non-positive frequencyWeeks (${chore.frequencyWeeks}) — this is an invariant ChoresService must enforce on create/update.`,
+        `Chore ${chore.id} has a non-positive frequencyValue (${chore.frequencyValue}) — this is an invariant ChoresService must enforce on create/update.`,
       );
     }
 
     const { anchorUser, otherUser } = resolveUsers(chore, users);
 
-    const weeksSinceAnchor = differenceInCalendarISOWeeks(
-      parseIsoWeek(isoWeek),
-      parseIsoWeek(chore.anchorIsoWeek),
-    );
-    if (weeksSinceAnchor < 0 || weeksSinceAnchor % chore.frequencyWeeks !== 0) {
+    const periodDays = periodDaysFor(chore);
+    const daysSinceAnchor = utcDayNumber(date) - utcDayNumber(chore.anchorDate);
+    if (daysSinceAnchor < 0 || daysSinceAnchor % periodDays !== 0) {
       return null;
     }
 
@@ -77,23 +109,42 @@ export class RotationService {
       return { userId: anchorUser.id };
     }
 
-    const occurrenceIndex = weeksSinceAnchor / chore.frequencyWeeks;
+    const occurrenceIndex = daysSinceAnchor / periodDays;
     return {
       userId: occurrenceIndex % 2 === 0 ? anchorUser.id : otherUser.id,
     };
   }
 
-  /** Pure filter/map over getChoreAssignment — only the occurring chores. */
-  getWeekOccurrences(
-    isoWeek: string,
+  /** Pure filter/map over getChoreAssignment across an inclusive date
+   * range — only the chores that occur on some day within it. The weekly
+   * block and the day navigator are both just callers with a different
+   * `from`/`to`, not separate rotation logic. */
+  getOccurrences(
+    from: Date,
+    to: Date,
     chores: ChoreConfig[],
     users: [RotationUser, RotationUser],
-  ): { choreId: string; userId: string }[] {
-    return chores.flatMap((chore) => {
-      const assignment = this.getChoreAssignment(isoWeek, chore, users);
-      return assignment
-        ? [{ choreId: chore.id, userId: assignment.userId }]
-        : [];
-    });
+  ): ChoreOccurrence[] {
+    const fromDay = utcDayNumber(from);
+    const toDay = utcDayNumber(to);
+    const days: Date[] = [];
+    for (let day = fromDay; day <= toDay; day++) {
+      days.push(utcDateFromDayNumber(day));
+    }
+
+    return chores.flatMap((chore) =>
+      days.flatMap((date) => {
+        const assignment = this.getChoreAssignment(date, chore, users);
+        return assignment
+          ? [
+              {
+                choreId: chore.id,
+                userId: assignment.userId,
+                occurrenceDate: date,
+              },
+            ]
+          : [];
+      }),
+    );
   }
 }

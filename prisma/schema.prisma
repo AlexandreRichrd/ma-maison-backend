@@ -182,17 +182,31 @@ enum AssignmentMode {
   @@map("assignment_mode")
 }
 
+// DAY = occurs every frequencyValue days, WEEK = occurs every
+// frequencyValue weeks (1 = weekly, 2 = biweekly, etc). Both frequency
+// fields are always populated — never a nullable pair per unit; see
+// rotation.service.ts for the single periodDays formula this feeds.
+enum FrequencyUnit {
+  DAY
+  WEEK
+
+  @@map("frequency_unit")
+}
+
 model Chore {
   id             String         @id @default(uuid()) @db.Uuid
   name           String
-  frequencyWeeks Int            @map("frequency_weeks")
+  frequencyUnit  FrequencyUnit  @map("frequency_unit")
+  frequencyValue Int            @map("frequency_value")
   assignmentMode AssignmentMode @map("assignment_mode")
-  // The ISO week (YYYY-Www) this chore first occurred. Every later
-  // occurrence is derived from this by rotation.service.ts — never a
-  // separately stored schedule.
-  anchorIsoWeek  String         @map("anchor_iso_week")
+  // The calendar date this chore first occurred. Every later occurrence is
+  // derived from this by rotation.service.ts — never a separately stored
+  // schedule. For frequencyUnit=WEEK this must be a Monday (enforced by
+  // ChoresService on create/update, not here — see its comment) so weekly
+  // chores stay aligned with the persistent weekly block in the UI.
+  anchorDate     DateTime       @map("anchor_date") @db.Date
   // Dual meaning depending on assignmentMode: for PINNED, the permanent
-  // assignee; for ROTATING, who was assigned on anchorIsoWeek (occurrence
+  // assignee; for ROTATING, who was assigned on anchorDate (occurrence
   // 0) — later occurrences alternate from there. One column instead of two
   // nullable ones (a chore is never in a state where both or neither
   // apply, so there's nothing a separate nullable pair would guard that

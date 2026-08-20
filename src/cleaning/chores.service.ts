@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateChoreDto } from './dto/create-chore.dto';
 import { UpdateChoreDto } from './dto/update-chore.dto';
 import { HouseholdMembersService } from './household-members.service';
+import { isoDayOfWeekUtc, parseIsoDate } from './iso-date.util';
 
 @Injectable()
 export class ChoresService {
@@ -29,15 +30,34 @@ export class ChoresService {
     }
   }
 
+  /**
+   * anchorDate must be a Monday whenever the *effective* frequencyUnit is
+   * WEEK, otherwise the weekly persistent block drifts out of alignment
+   * with the chore's actual occurrences. Checked here rather than in the
+   * DTO because on an update either field can be omitted — the value this
+   * needs to validate against depends on what's already on the row.
+   */
+  private assertAnchorAligned(
+    frequencyUnit: 'DAY' | 'WEEK',
+    anchorDate: Date,
+  ): void {
+    if (frequencyUnit === 'WEEK' && isoDayOfWeekUtc(anchorDate) !== 1) {
+      throw new ApiError(400, 'anchorDate', 'anchor_date_not_monday');
+    }
+  }
+
   async create(userId: string, dto: CreateChoreDto): Promise<Chore> {
     await this.assertHouseholdMember(userId, dto.anchorUserId);
+    const anchorDate = parseIsoDate(dto.anchorDate);
+    this.assertAnchorAligned(dto.frequencyUnit, anchorDate);
 
     return this.prisma.chore.create({
       data: {
         name: dto.name,
-        frequencyWeeks: dto.frequencyWeeks,
+        frequencyUnit: dto.frequencyUnit,
+        frequencyValue: dto.frequencyValue,
         assignmentMode: dto.assignmentMode,
-        anchorIsoWeek: dto.anchorIsoWeek,
+        anchorDate,
         anchorUserId: dto.anchorUserId,
       },
     });
@@ -58,13 +78,20 @@ export class ChoresService {
       await this.assertHouseholdMember(userId, dto.anchorUserId);
     }
 
+    const effectiveFrequencyUnit = dto.frequencyUnit ?? existing.frequencyUnit;
+    const anchorDate = dto.anchorDate
+      ? parseIsoDate(dto.anchorDate)
+      : existing.anchorDate;
+    this.assertAnchorAligned(effectiveFrequencyUnit, anchorDate);
+
     return this.prisma.chore.update({
       where: { id: choreId },
       data: {
         name: dto.name,
-        frequencyWeeks: dto.frequencyWeeks,
+        frequencyUnit: dto.frequencyUnit,
+        frequencyValue: dto.frequencyValue,
         assignmentMode: dto.assignmentMode,
-        anchorIsoWeek: dto.anchorIsoWeek,
+        anchorDate: dto.anchorDate ? anchorDate : undefined,
         anchorUserId: dto.anchorUserId,
       },
     });

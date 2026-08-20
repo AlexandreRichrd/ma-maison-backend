@@ -12,6 +12,7 @@ const CODE_BY_CONSTRAINT: Record<string, string> = {
   isUuid: 'invalid_id',
   matchesPassword: 'password_mismatch',
   isIsoWeek: 'invalid_iso_week',
+  isIsoDate: 'invalid_iso_date',
   isIso8601: 'invalid_type',
   arrayMaxSize: 'invalid_type',
   isArray: 'invalid_type',

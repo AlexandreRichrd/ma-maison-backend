@@ -6,12 +6,14 @@ import {
   HouseholdMembersService,
   type HouseholdMemberDto,
 } from './household-members.service';
+import { parseIsoWeek } from './iso-week.util';
 import { RotationService } from './rotation.service';
 
 export type ChoreDto = {
   id: string;
   name: string;
-  frequencyWeeks: number;
+  frequencyUnit: 'DAY' | 'WEEK';
+  frequencyValue: number;
   done: boolean;
 };
 
@@ -41,6 +43,10 @@ export class CleaningService {
     if (!memberPair) return [];
     const [first, second] = memberPair;
 
+    // The Monday of isoWeek — every WEEK-unit chore's occurrenceDate, when
+    // it occurs at all, lands exactly here (see rotation.service.ts).
+    const weekStart = parseIsoWeek(isoWeek);
+
     const [chores, completions] = await Promise.all([
       this.prisma.chore.findMany({ orderBy: { createdAt: 'asc' } }),
       this.prisma.choreCompletion.findMany({ where: { isoWeek } }),
@@ -48,10 +54,12 @@ export class CleaningService {
     const completedChoreIds = new Set(completions.map((c) => c.choreId));
     const choreById = new Map(chores.map((chore) => [chore.id, chore]));
 
-    const occurrences = this.rotation.getWeekOccurrences(isoWeek, chores, [
-      { id: first.id },
-      { id: second.id },
-    ]);
+    const occurrences = this.rotation.getOccurrences(
+      weekStart,
+      weekStart,
+      chores,
+      [{ id: first.id }, { id: second.id }],
+    );
 
     const choresByUser = new Map<string, ChoreDto[]>([
       [first.id, []],
@@ -63,7 +71,8 @@ export class CleaningService {
       choresByUser.get(occurrence.userId)?.push({
         id: chore.id,
         name: chore.name,
-        frequencyWeeks: chore.frequencyWeeks,
+        frequencyUnit: chore.frequencyUnit,
+        frequencyValue: chore.frequencyValue,
         done: completedChoreIds.has(chore.id),
       });
     }
@@ -101,10 +110,11 @@ export class CleaningService {
     }
     const [first, second] = memberPair;
 
-    const assignment = this.rotation.getChoreAssignment(isoWeek, chore, [
-      { id: first.id },
-      { id: second.id },
-    ]);
+    const assignment = this.rotation.getChoreAssignment(
+      parseIsoWeek(isoWeek),
+      chore,
+      [{ id: first.id }, { id: second.id }],
+    );
     if (!assignment) {
       throw new ApiError(409, 'form', 'chore_not_scheduled');
     }

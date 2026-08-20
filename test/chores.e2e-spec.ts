@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { AssignmentMode } from '@prisma/client';
+import { AssignmentMode, FrequencyUnit } from '@prisma/client';
 import * as argon2 from 'argon2';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -16,9 +16,10 @@ type LoginBody = { accessToken: string };
 type ChoreBody = {
   id: string;
   name: string;
-  frequencyWeeks: number;
+  frequencyUnit: string;
+  frequencyValue: number;
   assignmentMode: string;
-  anchorIsoWeek: string;
+  anchorDate: string;
   anchorUserId: string;
 };
 
@@ -99,24 +100,29 @@ describe('Chores admin CRUD (e2e)', () => {
   // would infer.
   function validChoreRow(): {
     name: string;
-    frequencyWeeks: number;
+    frequencyUnit: FrequencyUnit;
+    frequencyValue: number;
     assignmentMode: AssignmentMode;
-    anchorIsoWeek: string;
+    anchorDate: Date;
     anchorUserId: string;
   } {
     return {
       name: 'Cuisine',
-      frequencyWeeks: 1,
+      frequencyUnit: FrequencyUnit.WEEK,
+      frequencyValue: 1,
       assignmentMode: AssignmentMode.ROTATING,
-      anchorIsoWeek: '2024-W01',
+      anchorDate: new Date('2024-01-01'),
       anchorUserId: firstUserId,
     };
   }
 
   // Request bodies, which may deliberately carry invalid values (see the
   // rejects-an-invalid-% cases below) — overrides stay untyped on purpose.
+  // anchorDate is a plain 'YYYY-MM-DD' string over HTTP, unlike
+  // validChoreRow()'s Date (what Prisma's `anchorDate: DateTime @db.Date`
+  // column expects for a direct write).
   function validChore(overrides: Record<string, unknown> = {}) {
-    return { ...validChoreRow(), ...overrides };
+    return { ...validChoreRow(), anchorDate: '2024-01-01', ...overrides };
   }
 
   describe('GET /cleaning/chores', () => {
@@ -144,7 +150,8 @@ describe('Chores admin CRUD (e2e)', () => {
         .send(
           validChore({
             name: 'Draps',
-            frequencyWeeks: 2,
+            frequencyUnit: 'WEEK',
+            frequencyValue: 2,
             assignmentMode: 'PINNED',
           }),
         )
@@ -153,18 +160,20 @@ describe('Chores admin CRUD (e2e)', () => {
       const body = res.body as ChoreBody;
       expect(body).toMatchObject({
         name: 'Draps',
-        frequencyWeeks: 2,
+        frequencyUnit: 'WEEK',
+        frequencyValue: 2,
         assignmentMode: 'PINNED',
-        anchorIsoWeek: '2024-W01',
         anchorUserId: firstUserId,
       });
+      expect(body.anchorDate.slice(0, 10)).toBe('2024-01-01');
     });
 
     it.each([
       ['name', { name: '' }, 'required'],
-      ['frequencyWeeks', { frequencyWeeks: 0 }, 'too_small'],
+      ['frequencyUnit', { frequencyUnit: 'MONTH' }, 'invalid_type'],
+      ['frequencyValue', { frequencyValue: 0 }, 'too_small'],
       ['assignmentMode', { assignmentMode: 'SOMETHING_ELSE' }, 'invalid_type'],
-      ['anchorIsoWeek', { anchorIsoWeek: 'not-a-week' }, 'invalid_iso_week'],
+      ['anchorDate', { anchorDate: 'not-a-date' }, 'invalid_iso_date'],
       ['anchorUserId', { anchorUserId: 'not-a-uuid' }, 'invalid_id'],
     ])('rejects an invalid %s (%o)', async (field, override, code) => {
       const res = await request(app.getHttpServer())
@@ -175,17 +184,47 @@ describe('Chores admin CRUD (e2e)', () => {
       expect((res.body as ErrorBody).errors).toContainEqual({ field, code });
     });
 
-    it('rejects a non-numeric frequencyWeeks', async () => {
+    it('rejects a non-numeric frequencyValue', async () => {
       const res = await request(app.getHttpServer())
         .post('/cleaning/chores')
         .set(authed())
-        .send(validChore({ frequencyWeeks: 'not-a-number' }))
+        .send(validChore({ frequencyValue: 'not-a-number' }))
         .expect(400);
       expect(
         (res.body as ErrorBody).errors.some(
-          (e) => e.field === 'frequencyWeeks',
+          (e) => e.field === 'frequencyValue',
         ),
       ).toBe(true);
+    });
+
+    it('creates a daily chore with a non-Monday anchorDate', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/cleaning/chores')
+        .set(authed())
+        .send(
+          validChore({
+            name: 'Vaisselle',
+            frequencyUnit: 'DAY',
+            frequencyValue: 1,
+            // A Wednesday — fine for a daily chore.
+            anchorDate: '2024-01-03',
+          }),
+        )
+        .expect(201);
+
+      expect((res.body as ChoreBody).frequencyUnit).toBe('DAY');
+    });
+
+    it('rejects a non-Monday anchorDate for a weekly chore', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/cleaning/chores')
+        .set(authed())
+        // 2024-01-02 is a Tuesday.
+        .send(validChore({ anchorDate: '2024-01-02' }))
+        .expect(400);
+      expect((res.body as ErrorBody).errors).toEqual([
+        { field: 'anchorDate', code: 'anchor_date_not_monday' },
+      ]);
     });
 
     it('rejects a real but non-household anchorUserId', async () => {
@@ -256,6 +295,20 @@ describe('Chores admin CRUD (e2e)', () => {
         .set(authed())
         .send({ anchorUserId: outsider.id })
         .expect(400);
+    });
+
+    it('rejects patching anchorDate to a non-Monday on a weekly chore', async () => {
+      const chore = await prisma.chore.create({ data: validChoreRow() });
+
+      const res = await request(app.getHttpServer())
+        .patch(`/cleaning/chores/${chore.id}`)
+        .set(authed())
+        // 2024-01-02 is a Tuesday.
+        .send({ anchorDate: '2024-01-02' })
+        .expect(400);
+      expect((res.body as ErrorBody).errors).toEqual([
+        { field: 'anchorDate', code: 'anchor_date_not_monday' },
+      ]);
     });
   });
 

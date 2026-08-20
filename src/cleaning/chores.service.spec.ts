@@ -57,19 +57,53 @@ describe('ChoresService', () => {
 
       const chore = await chores.create(first.id, {
         name: 'Cuisine',
-        frequencyWeeks: 1,
+        frequencyUnit: 'WEEK',
+        frequencyValue: 1,
         assignmentMode: 'ROTATING',
-        anchorIsoWeek: '2024-W01',
+        anchorDate: '2024-01-01',
         anchorUserId: first.id,
       });
 
       expect(chore).toMatchObject({
         name: 'Cuisine',
-        frequencyWeeks: 1,
+        frequencyUnit: 'WEEK',
+        frequencyValue: 1,
         assignmentMode: 'ROTATING',
-        anchorIsoWeek: '2024-W01',
         anchorUserId: first.id,
       });
+      expect(chore.anchorDate.toISOString().slice(0, 10)).toBe('2024-01-01');
+    });
+
+    it('creates a daily chore with any anchor date, no Monday constraint', async () => {
+      const { first } = await seedHouseholdOfTwo();
+
+      const chore = await chores.create(first.id, {
+        name: 'Vaisselle',
+        frequencyUnit: 'DAY',
+        frequencyValue: 1,
+        assignmentMode: 'ROTATING',
+        // A Wednesday — fine for a daily chore.
+        anchorDate: '2024-01-03',
+        anchorUserId: first.id,
+      });
+
+      expect(chore.frequencyUnit).toBe('DAY');
+    });
+
+    it('rejects a non-Monday anchorDate for a weekly chore', async () => {
+      const { first } = await seedHouseholdOfTwo();
+
+      await expect(
+        chores.create(first.id, {
+          name: 'Cuisine',
+          frequencyUnit: 'WEEK',
+          frequencyValue: 1,
+          assignmentMode: 'ROTATING',
+          // A Tuesday.
+          anchorDate: '2024-01-02',
+          anchorUserId: first.id,
+        }),
+      ).rejects.toThrow(ApiError);
     });
 
     it('rejects an anchorUserId that is not a member of the caller’s household', async () => {
@@ -91,9 +125,10 @@ describe('ChoresService', () => {
       await expect(
         chores.create(first.id, {
           name: 'Cuisine',
-          frequencyWeeks: 1,
+          frequencyUnit: 'WEEK',
+          frequencyValue: 1,
           assignmentMode: 'ROTATING',
-          anchorIsoWeek: '2024-W01',
+          anchorDate: '2024-01-01',
           anchorUserId: outsider.id,
         }),
       ).rejects.toThrow(ApiError);
@@ -105,9 +140,10 @@ describe('ChoresService', () => {
       const { first } = await seedHouseholdOfTwo();
       const original = await chores.create(first.id, {
         name: 'Cuisine',
-        frequencyWeeks: 1,
+        frequencyUnit: 'WEEK',
+        frequencyValue: 1,
         assignmentMode: 'ROTATING',
-        anchorIsoWeek: '2024-W01',
+        anchorDate: '2024-01-01',
         anchorUserId: first.id,
       });
 
@@ -117,20 +153,57 @@ describe('ChoresService', () => {
 
       expect(updated).toMatchObject({
         name: 'Cuisine et vaisselle',
-        frequencyWeeks: 1,
+        frequencyUnit: 'WEEK',
+        frequencyValue: 1,
         assignmentMode: 'ROTATING',
-        anchorIsoWeek: '2024-W01',
         anchorUserId: first.id,
       });
+    });
+
+    it('rejects switching to WEEK when the existing anchorDate is not a Monday', async () => {
+      const { first } = await seedHouseholdOfTwo();
+      const original = await chores.create(first.id, {
+        name: 'Vaisselle',
+        frequencyUnit: 'DAY',
+        frequencyValue: 1,
+        assignmentMode: 'ROTATING',
+        // A Wednesday — fine while frequencyUnit is DAY.
+        anchorDate: '2024-01-03',
+        anchorUserId: first.id,
+      });
+
+      await expect(
+        chores.update(first.id, original.id, { frequencyUnit: 'WEEK' }),
+      ).rejects.toThrow(ApiError);
+    });
+
+    it('allows switching to WEEK when a new Monday anchorDate is given in the same update', async () => {
+      const { first } = await seedHouseholdOfTwo();
+      const original = await chores.create(first.id, {
+        name: 'Vaisselle',
+        frequencyUnit: 'DAY',
+        frequencyValue: 1,
+        assignmentMode: 'ROTATING',
+        anchorDate: '2024-01-03',
+        anchorUserId: first.id,
+      });
+
+      const updated = await chores.update(first.id, original.id, {
+        frequencyUnit: 'WEEK',
+        anchorDate: '2024-01-01',
+      });
+
+      expect(updated.frequencyUnit).toBe('WEEK');
     });
 
     it('rejects an anchorUserId that is not a member of the caller’s household', async () => {
       const { first, second } = await seedHouseholdOfTwo();
       const original = await chores.create(first.id, {
         name: 'Cuisine',
-        frequencyWeeks: 1,
+        frequencyUnit: 'WEEK',
+        frequencyValue: 1,
         assignmentMode: 'ROTATING',
-        anchorIsoWeek: '2024-W01',
+        anchorDate: '2024-01-01',
         anchorUserId: first.id,
       });
       const otherHousehold = await prisma.household.create({
@@ -172,9 +245,10 @@ describe('ChoresService', () => {
       const { first } = await seedHouseholdOfTwo();
       const chore = await chores.create(first.id, {
         name: 'Cuisine',
-        frequencyWeeks: 1,
+        frequencyUnit: 'WEEK',
+        frequencyValue: 1,
         assignmentMode: 'ROTATING',
-        anchorIsoWeek: '2024-W01',
+        anchorDate: '2024-01-01',
         anchorUserId: first.id,
       });
       await prisma.choreCompletion.create({
@@ -203,16 +277,18 @@ describe('ChoresService', () => {
       const { first } = await seedHouseholdOfTwo();
       await chores.create(first.id, {
         name: 'Cuisine',
-        frequencyWeeks: 1,
+        frequencyUnit: 'WEEK',
+        frequencyValue: 1,
         assignmentMode: 'ROTATING',
-        anchorIsoWeek: '2024-W01',
+        anchorDate: '2024-01-01',
         anchorUserId: first.id,
       });
       await chores.create(first.id, {
         name: 'Draps',
-        frequencyWeeks: 2,
+        frequencyUnit: 'WEEK',
+        frequencyValue: 2,
         assignmentMode: 'PINNED',
-        anchorIsoWeek: '2024-W01',
+        anchorDate: '2024-01-01',
         anchorUserId: first.id,
       });
 

@@ -1,4 +1,4 @@
-import { AssignmentMode } from '@prisma/client';
+import { AssignmentMode, FrequencyUnit } from '@prisma/client';
 import {
   IsEnum,
   IsInt,
@@ -8,27 +8,31 @@ import {
   Min,
 } from 'class-validator';
 
-import { IsIsoWeek } from './is-iso-week.decorator';
+import { IsIsoDate } from './is-iso-date.decorator';
 
 // Hand-written rather than PartialType(CreateChoreDto) — avoids a new
-// dependency (@nestjs/mapped-types) for 5 optional fields.
+// dependency (@nestjs/mapped-types) for 6 optional fields.
 export class UpdateChoreDto {
   @IsOptional()
   @IsNotEmpty()
   name?: string;
 
   @IsOptional()
+  @IsEnum(FrequencyUnit)
+  frequencyUnit?: FrequencyUnit;
+
+  @IsOptional()
   @IsInt()
   @Min(1)
-  frequencyWeeks?: number;
+  frequencyValue?: number;
 
   @IsOptional()
   @IsEnum(AssignmentMode)
   assignmentMode?: AssignmentMode;
 
   @IsOptional()
-  @IsIsoWeek()
-  anchorIsoWeek?: string;
+  @IsIsoDate()
+  anchorDate?: string;
 
   @IsOptional()
   @IsUUID()
