@@ -220,8 +220,28 @@ model Chore {
   // history down with it) if a remove-user flow is ever added.
   anchorUser  User              @relation(fields: [anchorUserId], references: [id], onDelete: Restrict)
   completions ChoreCompletion[]
+  subtasks    ChoreSubtask[]
 
   @@map("chores")
+}
+
+// Subtasks inherit everything from their parent chore — no frequency, no
+// assignee of their own. A chore is complete when every one of its
+// subtasks is complete (see ChoreCompletion) — adding or removing a
+// subtask changes what "complete" means for every past occurrence too,
+// same deliberate tradeoff as editing a chore's schedule after
+// completions exist (see CLAUDE.md's Chore rotation section).
+model ChoreSubtask {
+  id        String   @id @default(uuid()) @db.Uuid
+  choreId   String   @map("chore_id") @db.Uuid
+  label     String
+  position  Int
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  chore Chore @relation(fields: [choreId], references: [id], onDelete: Cascade)
+
+  @@map("chore_subtasks")
 }
 
 model ChoreCompletion {

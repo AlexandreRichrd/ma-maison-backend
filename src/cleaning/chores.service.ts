@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { Chore } from '@prisma/client';
+import type { Chore, ChoreSubtask } from '@prisma/client';
 
 import { ApiError } from '../common/api-error';
 import { PrismaService } from '../prisma/prisma.service';
@@ -8,6 +8,12 @@ import { UpdateChoreDto } from './dto/update-chore.dto';
 import { HouseholdMembersService } from './household-members.service';
 import { isoDayOfWeekUtc, parseIsoDate } from './iso-date.util';
 
+export type ChoreWithSubtasks = Chore & { subtasks: ChoreSubtask[] };
+
+const SUBTASKS_ORDERED = {
+  subtasks: { orderBy: { position: 'asc' as const } },
+};
+
 @Injectable()
 export class ChoresService {
   constructor(
@@ -15,8 +21,11 @@ export class ChoresService {
     private readonly householdMembers: HouseholdMembersService,
   ) {}
 
-  async list(): Promise<Chore[]> {
-    return this.prisma.chore.findMany({ orderBy: { createdAt: 'asc' } });
+  async list(): Promise<ChoreWithSubtasks[]> {
+    return this.prisma.chore.findMany({
+      orderBy: { createdAt: 'asc' },
+      include: SUBTASKS_ORDERED,
+    });
   }
 
   /** anchorUserId can't be validated in the DTO — it needs the caller's household. */
@@ -46,7 +55,10 @@ export class ChoresService {
     }
   }
 
-  async create(userId: string, dto: CreateChoreDto): Promise<Chore> {
+  async create(
+    userId: string,
+    dto: CreateChoreDto,
+  ): Promise<ChoreWithSubtasks> {
     await this.assertHouseholdMember(userId, dto.anchorUserId);
     const anchorDate = parseIsoDate(dto.anchorDate);
     this.assertAnchorAligned(dto.frequencyUnit, anchorDate);
@@ -60,6 +72,7 @@ export class ChoresService {
         anchorDate,
         anchorUserId: dto.anchorUserId,
       },
+      include: SUBTASKS_ORDERED,
     });
   }
 
@@ -67,7 +80,7 @@ export class ChoresService {
     userId: string,
     choreId: string,
     dto: UpdateChoreDto,
-  ): Promise<Chore> {
+  ): Promise<ChoreWithSubtasks> {
     const existing = await this.prisma.chore.findUnique({
       where: { id: choreId },
     });
@@ -94,6 +107,7 @@ export class ChoresService {
         anchorDate: dto.anchorDate ? anchorDate : undefined,
         anchorUserId: dto.anchorUserId,
       },
+      include: SUBTASKS_ORDERED,
     });
   }
 

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { ChoreSubtasksService } from './chore-subtasks.service';
 import { ChoresController } from './chores.controller';
 import { ChoresService } from './chores.service';
 import { CleaningController } from './cleaning.controller';
@@ -14,6 +15,7 @@ import { RotationService } from './rotation.service';
     CleaningService,
     HouseholdMembersService,
     ChoresService,
+    ChoreSubtasksService,
   ],
   exports: [RotationService, HouseholdMembersService],
 })
