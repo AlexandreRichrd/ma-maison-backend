@@ -8,14 +8,19 @@ export type BroadcastSelection = {
 
 /**
  * Picks what ClimateGateway should broadcast from one ingested batch: every
- * known-type measure sharing the batch's latest recordedAt, but only if
- * that timestamp is strictly newer than the last one already broadcast.
+ * known-type measure strictly newer than the last one already broadcast,
+ * with the watermark advanced to the batch's max recordedAt.
  *
- * temperature and humidite are normally reported together with the same
- * recordedAt (same ESPHome publish cycle) — comparing each type
- * independently against the last broadcast would silently drop whichever
- * one lost the tie, so the comparison happens once, against the batch's
- * max, and same-timestamp siblings go out together in the one broadcast.
+ * temperature and humidite are two separate MQTT messages, not one — real
+ * batches carry ~80ms apart recordedAt values between them, not a shared
+ * timestamp. An earlier version of this compared only the batch's max
+ * recordedAt against the watermark and broadcast just the measures tied
+ * with that max, which silently dropped whichever type wasn't last in the
+ * batch on every single ingest (always temperature, since the Pi sends it
+ * first) — comparing each measure independently against the watermark
+ * instead means same-timestamp siblings still go out together (both are
+ * newer than the watermark), but so do near-simultaneous siblings that
+ * merely share a batch.
  *
  * Pure and deterministic — no socket/event-emitter access — so it's
  * tested in isolation, same reasoning as rotation.service.ts.
@@ -38,7 +43,8 @@ export function selectBroadcast(
 
   const toBroadcast = known.filter(
     (measure) =>
-      new Date(measure.recordedAt).getTime() === maxRecordedAt.getTime(),
+      lastBroadcastAt === null ||
+      new Date(measure.recordedAt) > lastBroadcastAt,
   );
 
   return { measures: toBroadcast, lastBroadcastAt: maxRecordedAt };

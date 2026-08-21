@@ -32,6 +32,33 @@ describe('selectBroadcast', () => {
     );
   });
 
+  it('broadcasts both measures in a batch even when their recordedAt differs, as real MQTT-sourced readings do', () => {
+    // Regression test: temperature and humidite are separate MQTT messages,
+    // not one — the Pi's real payloads carry recordedAt values ~80ms apart
+    // (temperature first, humidite second), never an identical timestamp.
+    // A prior version of selectBroadcast only kept measures tied with the
+    // batch's exact max recordedAt, which silently dropped temperature on
+    // every batch since it never matched humidite's later timestamp.
+    const result = selectBroadcast(
+      [
+        measure('temperature', '21.3', '2026-08-15T10:00:00.000Z'),
+        measure('humidite', '47.2', '2026-08-15T10:00:00.080Z'),
+      ],
+      null,
+    );
+
+    expect(result?.measures).toEqual(
+      expect.arrayContaining([
+        measure('temperature', '21.3', '2026-08-15T10:00:00.000Z'),
+        measure('humidite', '47.2', '2026-08-15T10:00:00.080Z'),
+      ]),
+    );
+    expect(result?.measures).toHaveLength(2);
+    expect(result?.lastBroadcastAt).toEqual(
+      new Date('2026-08-15T10:00:00.080Z'),
+    );
+  });
+
   it('ignores non-climate types entirely', () => {
     const result = selectBroadcast(
       [
