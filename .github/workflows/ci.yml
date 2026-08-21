@@ -42,11 +42,14 @@ jobs:
 
       - run: npm ci
 
+      # Must run before typecheck/lint: there's no postinstall hook, so
+      # `npm ci` alone leaves @prisma/client as an empty stub with none of
+      # the generated model types tsc and eslint's type-aware rules need.
+      - run: npx prisma generate
+
       - run: npm run typecheck
 
       - run: npm run lint
-
-      - run: npx prisma generate
 
       # Safe against this service container specifically because it's a
       # fresh, empty database every run — same reasoning as the first-deploy
