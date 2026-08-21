@@ -329,14 +329,16 @@ IoT ingestion" `ClimateModule` was scaffolded for.
   `@Public()`, unlike ingestion). Returns the latest reading per
   `(deviceName, type)`, via Postgres `DISTINCT ON` (Prisma's `distinct` +
   a matching `orderBy`), filtered to a hardcoded known-types list
-  (`temperature`, `humidite` — matching `capteur-salon.yaml`'s sensor
-  `state_topic`s). Filtering matters because the Pi's `capteurs/#`
-  subscription also picks up non-climate topics (`rssi`, `uptime`,
-  `statut`, and an ESPHome debug/log message that leaks through) that land
-  in the same `measures` table — see `ClimateService.getCurrent()`'s
-  comment. `my-home`'s dashboard widget is wired to this now (see its
-  `CLAUDE.md`'s Dashboard section) — indoor temperature/humidity are real,
-  outdoor is still a hardcoded placeholder pending an outdoor sensor
+  (`temperature`, `humidite`, `batterie` — matching `capteur-salon.yaml`'s
+  and `capteur-exterieur.yaml`'s sensor `state_topic`s). Filtering matters
+  because the Pi's `capteurs/#` subscription also picks up non-climate
+  topics (`rssi`, `uptime`, `statut`, and an ESPHome debug/log message that
+  leaks through) that land in the same `measures` table — see
+  `ClimateService.getCurrent()`'s comment. `my-home`'s dashboard widget is
+  wired to this now (see its `CLAUDE.md`'s Dashboard section) — indoor
+  temperature/humidity and outdoor temperature are all real readings,
+  distinguished by `deviceName` (`capteur-salon` vs `capteur-exterieur`),
+  not separate endpoints
 
 ## Database
 
@@ -684,8 +686,7 @@ Climate. Indoor sensor readings reach this API via the household's Pi
 bridge *pushing* batches to `POST /climate/measures` over HTTPS, so
 nothing here needs to reach into the home LAN the way a pull-based
 integration would have. `GET /climate/current` now serves the dashboard's
-home-climate widget in `my-home`, indoor readings only — outdoor is still
-a hardcoded frontend placeholder pending a real outdoor sensor.
+home-climate widget in `my-home`, both indoor and outdoor readings.
 
 ## Not in scope yet
 
