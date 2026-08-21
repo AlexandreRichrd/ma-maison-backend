@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: home_manager
+          POSTGRES_PASSWORD: home_manager
+          POSTGRES_DB: hearth_backend_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U home_manager"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Matches .env.test's DATABASE_URL — the service container above is
+      # the same hearth_backend_test database that file already points at.
+      # prisma.config.ts loads `.env` via dotenv, not `.env.test`, so
+      # `prisma migrate deploy` needs this set directly; Jest's own
+      # setupFiles load `.env.test` for the test run itself.
+      DATABASE_URL: postgres://home_manager:home_manager@localhost:5432/hearth_backend_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm run lint
+
+      - run: npx prisma generate
+
+      # Safe against this service container specifically because it's a
+      # fresh, empty database every run — same reasoning as the first-deploy
+      # note in the root repo's CLAUDE.md. Never use this against the real
+      # dev/prod datasource (see this repo's CLAUDE.md Migration history note).
+      - run: npx prisma migrate deploy
+
+      # --runInBand (unit) / maxWorkers: 1 (test/jest-e2e.json) are both
+      # required, not just a speed choice — suites share one database and
+      # race on TRUNCATE otherwise.
+      - run: npm run test
+
+      - run: npm run test:e2e
