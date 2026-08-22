@@ -1,5 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import cookieParser from 'cookie-parser';
 import { AppController } from './app.controller';
@@ -20,6 +21,7 @@ import { throttlerConfig } from './throttler.config';
   imports: [
     CommonModule,
     EventEmitterModule.forRoot(),
+    ScheduleModule.forRoot(),
     ThrottlerModule.forRoot(throttlerConfig),
     PrismaModule,
     MailModule,
