@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { endOfDay } from 'date-fns';
+import { addDays, endOfDay } from 'date-fns';
 import type { Reminder } from '@prisma/client';
 
 import { ApiError } from '../common/api-error';
+import { parseIsoDate } from '../cleaning/iso-date.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReminderDto } from './dto/create-reminder.dto';
 
@@ -10,8 +11,27 @@ import { CreateReminderDto } from './dto/create-reminder.dto';
 export class RemindersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(): Promise<Reminder[]> {
-    return this.prisma.reminder.findMany({ orderBy: { dueAt: 'asc' } });
+  /** Unfiltered (from/to both omitted) for the flat list — bounded to
+   * [from, to] inclusive, by calendar day, for the week/month calendar
+   * views. Both-or-neither: a lone from or to is almost certainly a caller
+   * bug, not a valid request. */
+  async list(from?: string, to?: string): Promise<Reminder[]> {
+    if ((from && !to) || (to && !from)) {
+      throw new ApiError(400, 'from', 'range_incomplete');
+    }
+
+    return this.prisma.reminder.findMany({
+      where:
+        from && to
+          ? {
+              dueAt: {
+                gte: parseIsoDate(from),
+                lt: addDays(parseIsoDate(to), 1),
+              },
+            }
+          : undefined,
+      orderBy: { dueAt: 'asc' },
+    });
   }
 
   /** Undone reminders due by end of today, for the dashboard widget. */
