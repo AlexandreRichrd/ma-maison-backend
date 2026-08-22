@@ -301,6 +301,31 @@ model Measure {
   @@map("measures")
 }
 
+// One row per (device, measure type, local calendar day) — written nightly
+// by ClimateSummaryService from that day's raw measures, kept indefinitely
+// (unlike measures, which are purged after CLIMATE_SUMMARY_RETENTION_DAYS).
+// `date` is a Europe/Paris calendar day, not a UTC one — see
+// src/climate/paris-time.util.ts. The @@unique is what makes the nightly
+// job idempotent: re-running for a day upserts the same row instead of
+// duplicating it. No row is ever written for a device+type with zero
+// readings that day (a sensor offline for the day) — the aggregation
+// query's GROUP BY only emits groups that have at least one row.
+model DailySummary {
+  id          String   @id @default(uuid()) @db.Uuid
+  deviceName  String   @map("device_name")
+  type        String
+  date        DateTime @db.Date
+  min         Decimal  @db.Decimal
+  max         Decimal  @db.Decimal
+  avg         Decimal  @db.Decimal
+  sampleCount Int      @map("sample_count")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([deviceName, type, date])
+  @@map("daily_summaries")
+}
+
 // ---------------------------------------------------------------------------
 // reminders domain: reminders
 // ---------------------------------------------------------------------------
