@@ -14,6 +14,7 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "bootstrap:household": "node dist/bootstrap-household.js",
+    "climate:backfill-summary": "node dist/climate/backfill-daily-summary.js",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest --runInBand",
     "test:watch": "jest --watch",
