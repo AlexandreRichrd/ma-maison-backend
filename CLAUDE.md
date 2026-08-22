@@ -83,6 +83,9 @@ src/
   climate/
     climate.controller.ts   # POST /climate/measures — device-token ingestion, see Climate
     climate.service.ts
+    climate-summary.service.ts  # nightly daily_summaries job + GET /climate/summaries, see Climate
+    paris-time.util.ts          # Europe/Paris day-boundary math (luxon) — see Climate
+    backfill-daily-summary.ts   # npm run climate:backfill-summary -- <date> ..., see Climate
     device-auth.guard.ts    # static bearer token, not user JWT — see Climate
   common/
     dto/                    # shared DTOs (pagination, etc.) if any emerge
@@ -340,6 +343,66 @@ IoT ingestion" `ClimateModule` was scaffolded for.
   distinguished by `deviceName` (`capteur-salon` vs `capteur-exterieur`),
   not separate endpoints
 
+### Daily summaries and retention
+
+`measures` grows unbounded otherwise (two sensors reporting every 1-2
+minutes is ~2900 rows/day) — `ClimateSummaryService`
+(`src/climate/climate-summary.service.ts`) keeps long-range history cheap
+by aggregating into `daily_summaries` (one row per device+type+day, kept
+indefinitely — see Database) and then purging raw rows past a retention
+window.
+
+- **Timezone**: a "day" means a **Europe/Paris calendar day**, not a UTC
+  one — `measures.recorded_at` is UTC, and computing day boundaries on UTC
+  midnight would shift min/max by up to two hours in summer (CEST,
+  UTC+2) vs winter (CET, UTC+1). `src/climate/paris-time.util.ts` handles
+  this with `luxon` (already a transitive dependency via
+  `@nestjs/schedule` -> `cron` -> `luxon`, added here as a direct one):
+  `parisDayBoundsUtc()` gives the `[start, end)` UTC instants for a Paris
+  calendar date, `yesterdayParisDate()` gives the date the nightly job
+  should summarize, and `purgeCutoffUtc()` subtracts whole Paris calendar
+  days (not a flat `N * 24h` in milliseconds, which would land an hour off
+  across a DST transition).
+- **Nightly job**: `ClimateSummaryService.runNightlySummaryAndPurge()`,
+  `@Cron('10 0 * * *', { timeZone: 'Europe/Paris' })` — 00:10 Paris time,
+  10 minutes past midnight as a buffer for any still-in-flight reading.
+  Always **summarize the day that just ended before purging** — the two
+  are separate calls in sequence, and the purge is only reached if the
+  summarize call didn't throw (aggregating after purging would lose data
+  permanently). `ScheduleModule.forRoot()` is registered in `AppModule`
+  for `@Cron` to be picked up.
+- **Idempotent**: `summarizeDay(isoDate)` upserts into `daily_summaries`
+  keyed on `(deviceName, type, date)` (the table's `@@unique`) — re-running
+  for a date that already has a row overwrites it instead of duplicating,
+  so a restart or a missed night is harmless to re-run.
+- **No data, no row**: a device+type with zero readings that Paris day
+  gets no `daily_summaries` row (not a row of nulls) — this falls out of
+  the aggregation query's `GROUP BY device_name, type`, which only emits
+  groups that have at least one matching `measures` row; there's no
+  separate "was there any data" branch.
+- **Retention**: `purgeOlderThan(retentionDays)` deletes `measures` rows
+  older than `retentionDays` Paris calendar days back from today.
+  `CLIMATE_SUMMARY_RETENTION_DAYS` (default `7`) controls the window, same
+  `process.env` pattern as `CLIMATE_INGEST_TOKEN` — see `.env.example`.
+  Independent of which day `summarizeDay()` just processed, so a missed
+  night doesn't shrink the window.
+- **Backfill**: `src/climate/backfill-daily-summary.ts` (run via `npm run
+  climate:backfill-summary -- <date> [<date> ...]`, or directly as `node
+  dist/climate/backfill-daily-summary.js <date> ...`) calls
+  `summarizeDay()` for one or more explicit past dates and never purges —
+  needed once, for any date range with raw history older than the
+  retention window that hasn't been summarized yet, so it isn't lost the
+  first time the nightly purge runs. `ClimateBackfillModule` mirrors
+  `BootstrapModule`'s pattern of importing only what the script needs
+  (`PrismaModule`), not the full `ClimateModule` (which would pull in the
+  websocket gateway).
+- `GET /climate/summaries?deviceName=capteur-salon&from=2026-08-01&to=2026-08-22`
+  is the read side, for `my-home`'s per-sensor history view — behind the
+  global `JwtAuthGuard` like `/climate/current`. `from`/`to` reuse
+  `cleaning`'s `IsIsoDate` validator and `parseIsoDate()` (see Chore
+  rotation's UTC-date note) rather than a second copy of the same date
+  handling.
+
 ## Database
 
 Prisma schema at `prisma/schema.prisma`. Connection string in `DATABASE_URL`
@@ -361,7 +424,8 @@ is constructed — inject it, never `new PrismaClient()` elsewhere.
 | `chore_subtasks` | chore_id, label, position |
 | `chore_completions` | chore_id, user_id, subtask_id nullable, occurrence_date, completed_at |
 | `reminders` | title, due_at, done_at nullable, assignee_ids (0-2, no FK — array column) |
-| `measures` | device_name, type, value (all text — see Climate), recorded_at, created_at. One row per metric, so a device reporting temperature and humidity together produces two rows |
+| `measures` | device_name, type, value (all text — see Climate), recorded_at, created_at. One row per metric, so a device reporting temperature and humidity together produces two rows. Purged past `CLIMATE_SUMMARY_RETENTION_DAYS` — see Daily summaries and retention |
+| `daily_summaries` | device_name, type, date (a Europe/Paris calendar day, `@db.Date`), min/max/avg (`Decimal`), sample_count. One row per device+type+day, kept indefinitely — see Daily summaries and retention |
 
 This is the same schema the old Drizzle setup used — port it into
 `schema.prisma` rather than redesigning it. Conventions:
