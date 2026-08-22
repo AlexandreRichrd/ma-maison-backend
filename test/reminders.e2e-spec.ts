@@ -187,6 +187,46 @@ describe('Reminders (e2e)', () => {
     });
   });
 
+  it('filters GET /reminders by from/to when both are given', async () => {
+    await request(app.getHttpServer())
+      .post('/reminders')
+      .set(authed())
+      .send({
+        title: 'In range',
+        dueAt: new Date().toISOString(),
+        assigneeIds: [],
+      })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/reminders')
+      .set(authed())
+      .send({
+        title: 'Out of range',
+        dueAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        assigneeIds: [],
+      })
+      .expect(201);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const res = await request(app.getHttpServer())
+      .get(`/reminders?from=${today}&to=${today}`)
+      .set(authed())
+      .expect(200);
+    expect((res.body as ReminderBody[]).map((r) => r.title)).toEqual([
+      'In range',
+    ]);
+  });
+
+  it('rejects a from without a matching to', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/reminders?from=2026-08-10')
+      .set(authed())
+      .expect(400);
+    expect((res.body as ErrorBody).errors).toEqual([
+      { field: 'from', code: 'range_incomplete' },
+    ]);
+  });
+
   it('404s toggling an unknown reminder', async () => {
     const res = await request(app.getHttpServer())
       .patch('/reminders/00000000-0000-0000-0000-000000000000/toggle')

@@ -58,6 +58,54 @@ describe('RemindersService', () => {
 
       expect(result.map((r) => r.id)).toEqual([sooner.id, later.id]);
     });
+
+    it('filters to reminders due within [from, to] inclusive when both are given', async () => {
+      const before = await prisma.reminder.create({
+        data: {
+          title: 'Before range',
+          dueAt: new Date('2026-08-09T12:00:00Z'),
+          assigneeIds: [],
+        },
+      });
+      const atStart = await prisma.reminder.create({
+        data: {
+          title: 'At range start',
+          dueAt: new Date('2026-08-10T00:00:00Z'),
+          assigneeIds: [],
+        },
+      });
+      const atEnd = await prisma.reminder.create({
+        data: {
+          title: 'At range end',
+          dueAt: new Date('2026-08-16T23:59:00Z'),
+          assigneeIds: [],
+        },
+      });
+      const after = await prisma.reminder.create({
+        data: {
+          title: 'After range',
+          dueAt: new Date('2026-08-17T00:00:00Z'),
+          assigneeIds: [],
+        },
+      });
+
+      const result = await reminders.list('2026-08-10', '2026-08-16');
+
+      expect(result.map((r) => r.id).sort()).toEqual(
+        [atStart.id, atEnd.id].sort(),
+      );
+      expect(result.find((r) => r.id === before.id)).toBeUndefined();
+      expect(result.find((r) => r.id === after.id)).toBeUndefined();
+    });
+
+    it('rejects a from without a to, and vice versa', async () => {
+      await expect(reminders.list('2026-08-10', undefined)).rejects.toThrow(
+        ApiError,
+      );
+      await expect(reminders.list(undefined, '2026-08-16')).rejects.toThrow(
+        ApiError,
+      );
+    });
   });
 
   describe('dueToday', () => {

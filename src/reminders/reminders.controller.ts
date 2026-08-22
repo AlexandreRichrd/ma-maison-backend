@@ -7,9 +7,11 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 
 import { CreateReminderDto } from './dto/create-reminder.dto';
+import { GetRemindersQueryDto } from './dto/get-reminders-query.dto';
 import { RemindersService } from './reminders.service';
 
 @Controller()
@@ -23,9 +25,12 @@ export class RemindersController {
     return this.reminders.dueToday();
   }
 
+  // from/to are optional — the flat list view still asks for everything.
+  // The week/month calendar views pass both, so only ~7 or ~42 days of
+  // reminders are fetched instead of the household's whole history.
   @Get('reminders')
-  list() {
-    return this.reminders.list();
+  list(@Query() query: GetRemindersQueryDto) {
+    return this.reminders.list(query.from, query.to);
   }
 
   @Post('reminders')
