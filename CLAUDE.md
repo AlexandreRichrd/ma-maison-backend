@@ -305,6 +305,23 @@ of old `chore_completions` rows when this happens, and none is attempted:
   to the other person after an `assignmentMode`/`anchorUserId` edit.
   Documented behavior, not a bug to fix here.
 
+## Reminders
+
+`GET /reminders` (`RemindersController.list()`) takes an optional `from`/
+`to` (both-or-neither — a lone one 400s with `range_incomplete`), each a
+plain `'YYYY-MM-DD'` validated with `IsIsoDate` and parsed with `cleaning`'s
+`parseIsoDate` (see Chore rotation's UTC-date note), reusing the same
+pattern as `GET /climate/summaries?from=&to=` and `GET /cleaning/week?week=`
+rather than inventing a third shape for "give me a date range". Omitted,
+it returns every reminder ever created, ordered by `dueAt` — that's what
+the frontend's flat list view still uses. Passed, it filters to reminders
+due within `[from, to]` inclusive by calendar day (`dueAt >= from` and
+`< to + 1 day`) — what the frontend's week/month calendar views use, since
+there's no delete-on-complete (`doneAt` is nullable, see Database): the
+unfiltered list only grows over the household's lifetime, never shrinks,
+so fetching all of it to render a 7- or ~42-day grid gets more wasteful
+over time, not less.
+
 ## Climate
 
 `POST /climate/measures` ingests sensor readings forwarded by the
