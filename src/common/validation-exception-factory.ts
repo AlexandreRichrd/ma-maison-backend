@@ -15,6 +15,7 @@ const CODE_BY_CONSTRAINT: Record<string, string> = {
   isIsoDate: 'invalid_iso_date',
   isIso8601: 'invalid_type',
   arrayMaxSize: 'invalid_type',
+  arrayMinSize: 'at_least_one_required',
   isArray: 'invalid_type',
   isInt: 'invalid_type',
   min: 'too_small',

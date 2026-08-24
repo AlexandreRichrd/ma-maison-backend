@@ -59,7 +59,7 @@ describe('Shopping (e2e)', () => {
   });
 
   beforeEach(async () => {
-    await prisma.$executeRaw`TRUNCATE shopping_lists, shopping_items, recipes, recipe_ingredients RESTART IDENTITY CASCADE`;
+    await prisma.$executeRaw`TRUNCATE shopping_lists, shopping_items, recipes, recipe_ingredients, recipe_steps RESTART IDENTITY CASCADE`;
   });
 
   function authed() {
@@ -149,7 +149,7 @@ describe('Shopping (e2e)', () => {
 
   it('adds recipe ingredients to a new list atomically', async () => {
     const recipe = await prisma.recipe.create({
-      data: { name: 'Soup', servings: 4, instructions: '...' },
+      data: { name: 'Soup', servings: 4 },
     });
     await prisma.recipeIngredient.createMany({
       data: [
@@ -158,14 +158,14 @@ describe('Shopping (e2e)', () => {
           position: 0,
           name: 'Carrot',
           quantity: '2',
-          unit: '',
+          unit: 'UNITE',
         },
         {
           recipeId: recipe.id,
           position: 1,
           name: 'Onion',
           quantity: '1',
-          unit: '',
+          unit: 'UNITE',
         },
       ],
     });

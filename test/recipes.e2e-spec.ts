@@ -60,7 +60,7 @@ describe('Recipes (e2e)', () => {
   });
 
   beforeEach(async () => {
-    await prisma.$executeRaw`TRUNCATE recipes, recipe_ingredients RESTART IDENTITY CASCADE`;
+    await prisma.$executeRaw`TRUNCATE recipes, recipe_ingredients, recipe_steps, shopping_lists, shopping_items RESTART IDENTITY CASCADE`;
   });
 
   function authed() {
@@ -73,7 +73,7 @@ describe('Recipes (e2e)', () => {
 
   it('lists recipes with an ingredient count', async () => {
     const recipe = await prisma.recipe.create({
-      data: { name: 'Soup', servings: 4, instructions: '...' },
+      data: { name: 'Soup', servings: 4 },
     });
     await prisma.recipeIngredient.createMany({
       data: [
@@ -82,7 +82,7 @@ describe('Recipes (e2e)', () => {
           position: 0,
           name: 'Carrot',
           quantity: '2',
-          unit: '',
+          unit: 'UNITE',
         },
       ],
     });
@@ -103,7 +103,7 @@ describe('Recipes (e2e)', () => {
 
   it('returns recipe detail with ordered ingredients', async () => {
     const recipe = await prisma.recipe.create({
-      data: { name: 'Soup', servings: 4, instructions: '...' },
+      data: { name: 'Soup', servings: 4 },
     });
     await prisma.recipeIngredient.createMany({
       data: [
@@ -112,14 +112,14 @@ describe('Recipes (e2e)', () => {
           position: 1,
           name: 'Onion',
           quantity: '1',
-          unit: '',
+          unit: 'UNITE',
         },
         {
           recipeId: recipe.id,
           position: 0,
           name: 'Carrot',
           quantity: '2',
-          unit: '',
+          unit: 'UNITE',
         },
       ],
     });
@@ -142,5 +142,151 @@ describe('Recipes (e2e)', () => {
     expect((res.body as ErrorBody).errors).toEqual([
       { field: 'id', code: 'not_found' },
     ]);
+  });
+
+  function validRecipeBody() {
+    return {
+      name: 'Soup',
+      servings: 4,
+      ingredients: [{ name: 'Carrot', quantity: '2', unit: 'UNITE' }],
+      steps: [{ text: 'Chop' }, { text: 'Simmer' }],
+    };
+  }
+
+  describe('POST /recipes', () => {
+    it('creates a recipe with its ingredients and steps', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/recipes')
+        .set(authed())
+        .send(validRecipeBody())
+        .expect(201);
+
+      const body = res.body as RecipeDetailBody & {
+        steps: { text: string }[];
+      };
+      expect(body.recipe.name).toBe('Soup');
+      expect(body.ingredients.map((i) => i.name)).toEqual(['Carrot']);
+      expect(body.steps.map((s) => s.text)).toEqual(['Chop', 'Simmer']);
+    });
+
+    it('rejects a recipe with no ingredients', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/recipes')
+        .set(authed())
+        .send({ ...validRecipeBody(), ingredients: [] })
+        .expect(400);
+      expect((res.body as ErrorBody).errors).toEqual(
+        expect.arrayContaining([
+          { field: 'ingredients', code: 'at_least_one_required' },
+        ]),
+      );
+    });
+
+    it('rejects an invalid unit', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/recipes')
+        .set(authed())
+        .send({
+          ...validRecipeBody(),
+          ingredients: [{ name: 'Carrot', quantity: '2', unit: 'grammes' }],
+        })
+        .expect(400);
+      expect((res.body as ErrorBody).errors).toEqual(
+        expect.arrayContaining([{ field: 'unit', code: 'invalid_type' }]),
+      );
+    });
+  });
+
+  describe('PATCH /recipes/:id', () => {
+    it('404s for an unknown recipe', async () => {
+      const res = await request(app.getHttpServer())
+        .patch('/recipes/00000000-0000-0000-0000-000000000000')
+        .set(authed())
+        .send({ servings: 6 })
+        .expect(404);
+      expect((res.body as ErrorBody).errors).toEqual([
+        { field: 'id', code: 'not_found' },
+      ]);
+    });
+
+    it('replaces ingredients and steps when given', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/recipes')
+        .set(authed())
+        .send(validRecipeBody())
+        .expect(201);
+      const recipeId = (created.body as { recipe: { id: string } }).recipe.id;
+
+      const res = await request(app.getHttpServer())
+        .patch(`/recipes/${recipeId}`)
+        .set(authed())
+        .send({
+          ingredients: [{ name: 'Leek', quantity: '1', unit: 'UNITE' }],
+          steps: [{ text: 'Boil' }],
+        })
+        .expect(200);
+
+      const body = res.body as RecipeDetailBody & {
+        steps: { text: string }[];
+      };
+      expect(body.ingredients.map((i) => i.name)).toEqual(['Leek']);
+      expect(body.steps.map((s) => s.text)).toEqual(['Boil']);
+    });
+  });
+
+  describe('DELETE /recipes/:id', () => {
+    it('404s for an unknown recipe', async () => {
+      const res = await request(app.getHttpServer())
+        .delete('/recipes/00000000-0000-0000-0000-000000000000')
+        .set(authed())
+        .expect(404);
+      expect((res.body as ErrorBody).errors).toEqual([
+        { field: 'id', code: 'not_found' },
+      ]);
+    });
+
+    it('deletes the recipe', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/recipes')
+        .set(authed())
+        .send(validRecipeBody())
+        .expect(201);
+      const recipeId = (created.body as { recipe: { id: string } }).recipe.id;
+
+      await request(app.getHttpServer())
+        .delete(`/recipes/${recipeId}`)
+        .set(authed())
+        .expect(204);
+
+      await request(app.getHttpServer())
+        .get(`/recipes/${recipeId}`)
+        .set(authed())
+        .expect(404);
+    });
+
+    it('leaves shopping items already sourced from it in place, unattributed', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/recipes')
+        .set(authed())
+        .send(validRecipeBody())
+        .expect(201);
+      const recipeId = (created.body as { recipe: { id: string } }).recipe.id;
+
+      const listRes = await request(app.getHttpServer())
+        .post('/shopping-lists/add-ingredients')
+        .set(authed())
+        .send({ recipeId, newListName: 'Soup night' })
+        .expect(201);
+      const listId = (listRes.body as { listId: string }).listId;
+
+      await request(app.getHttpServer())
+        .delete(`/recipes/${recipeId}`)
+        .set(authed())
+        .expect(204);
+
+      const items = await prisma.shoppingItem.findMany({ where: { listId } });
+      expect(items).toHaveLength(1);
+      expect(items[0].sourceRecipeId).toBeNull();
+    });
   });
 });

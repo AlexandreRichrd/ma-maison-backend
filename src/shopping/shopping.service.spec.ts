@@ -1,3 +1,5 @@
+import { Unit } from '@prisma/client';
+
 import { IngredientsService } from '../recipes/ingredients.service';
 import { ApiError } from '../common/api-error';
 import { PrismaService } from '../prisma/prisma.service';
@@ -32,21 +34,21 @@ describe('ShoppingService', () => {
             listId: listA.id,
             name: 'x',
             quantity: '1',
-            unit: '',
+            unit: 'UNITE',
             checked: false,
           },
           {
             listId: listA.id,
             name: 'y',
             quantity: '1',
-            unit: '',
+            unit: 'UNITE',
             checked: true,
           },
           {
             listId: listB.id,
             name: 'z',
             quantity: '1',
-            unit: '',
+            unit: 'UNITE',
             checked: false,
           },
         ],
@@ -98,7 +100,7 @@ describe('ShoppingService', () => {
       const item = await shopping.addItem(list.id, {
         name: 'Eggs',
         quantity: '12',
-        unit: '',
+        unit: 'UNITE',
       });
 
       expect(item.checked).toBe(false);
@@ -110,7 +112,7 @@ describe('ShoppingService', () => {
         shopping.addItem('00000000-0000-0000-0000-000000000000', {
           name: 'Eggs',
           quantity: '12',
-          unit: '',
+          unit: 'UNITE',
         }),
       ).rejects.toThrow(ApiError);
     });
@@ -147,10 +149,10 @@ describe('ShoppingService', () => {
 
   describe('addIngredientsToList', () => {
     async function seedRecipe(
-      ingredients: { name: string; quantity: string; unit: string }[],
+      ingredients: { name: string; quantity: string; unit: Unit }[],
     ) {
       const recipe = await prisma.recipe.create({
-        data: { name: 'Soup', servings: 4, instructions: '...' },
+        data: { name: 'Soup', servings: 4 },
       });
       await prisma.recipeIngredient.createMany({
         data: ingredients.map((ingredient, position) => ({
@@ -164,7 +166,7 @@ describe('ShoppingService', () => {
 
     it('rejects when neither listId nor newListName is given', async () => {
       const recipe = await seedRecipe([
-        { name: 'Carrot', quantity: '2', unit: '' },
+        { name: 'Carrot', quantity: '2', unit: 'UNITE' },
       ]);
       await expect(
         shopping.addIngredientsToList({ recipeId: recipe.id }),
@@ -173,7 +175,7 @@ describe('ShoppingService', () => {
 
     it('rejects when both listId and newListName are given', async () => {
       const recipe = await seedRecipe([
-        { name: 'Carrot', quantity: '2', unit: '' },
+        { name: 'Carrot', quantity: '2', unit: 'UNITE' },
       ]);
       const list = await prisma.shoppingList.create({
         data: { name: 'Existing' },
@@ -189,8 +191,8 @@ describe('ShoppingService', () => {
 
     it('creates a new list and adds every ingredient to it (new-list path)', async () => {
       const recipe = await seedRecipe([
-        { name: 'Carrot', quantity: '2', unit: '' },
-        { name: 'Onion', quantity: '1', unit: '' },
+        { name: 'Carrot', quantity: '2', unit: 'UNITE' },
+        { name: 'Onion', quantity: '1', unit: 'UNITE' },
       ]);
 
       const result = await shopping.addIngredientsToList({
@@ -217,7 +219,7 @@ describe('ShoppingService', () => {
 
     it('merges into an existing unchecked row with the same normalised name and unit', async () => {
       const recipe = await seedRecipe([
-        { name: '  Carrot  ', quantity: '2', unit: 'kg' },
+        { name: '  Carrot  ', quantity: '2', unit: 'KG' },
       ]);
       const list = await prisma.shoppingList.create({
         data: { name: 'Existing' },
@@ -227,7 +229,7 @@ describe('ShoppingService', () => {
           listId: list.id,
           name: 'carrot',
           quantity: '1',
-          unit: 'kg',
+          unit: 'KG',
           checked: false,
         },
       });
@@ -253,7 +255,7 @@ describe('ShoppingService', () => {
 
     it('does not merge into a checked row — creates a new row instead', async () => {
       const recipe = await seedRecipe([
-        { name: 'Carrot', quantity: '2', unit: 'kg' },
+        { name: 'Carrot', quantity: '2', unit: 'KG' },
       ]);
       const list = await prisma.shoppingList.create({
         data: { name: 'Existing' },
@@ -263,7 +265,7 @@ describe('ShoppingService', () => {
           listId: list.id,
           name: 'Carrot',
           quantity: '1',
-          unit: 'kg',
+          unit: 'KG',
           checked: true,
         },
       });
@@ -284,7 +286,7 @@ describe('ShoppingService', () => {
 
     it('does not merge across a unit mismatch — creates a new row instead', async () => {
       const recipe = await seedRecipe([
-        { name: 'Carrot', quantity: '2', unit: 'kg' },
+        { name: 'Carrot', quantity: '2', unit: 'KG' },
       ]);
       const list = await prisma.shoppingList.create({
         data: { name: 'Existing' },
@@ -294,7 +296,7 @@ describe('ShoppingService', () => {
           listId: list.id,
           name: 'Carrot',
           quantity: '1',
-          unit: 'g',
+          unit: 'G',
           checked: false,
         },
       });
@@ -315,7 +317,7 @@ describe('ShoppingService', () => {
 
     it('rejects an unknown listId', async () => {
       const recipe = await seedRecipe([
-        { name: 'Carrot', quantity: '2', unit: '' },
+        { name: 'Carrot', quantity: '2', unit: 'UNITE' },
       ]);
       await expect(
         shopping.addIngredientsToList({

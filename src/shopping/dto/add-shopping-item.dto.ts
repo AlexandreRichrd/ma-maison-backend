@@ -1,10 +1,5 @@
-import {
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  Matches,
-  MaxLength,
-} from 'class-validator';
+import { Unit } from '@prisma/client';
+import { IsEnum, IsNotEmpty, IsOptional, Matches } from 'class-validator';
 
 export class AddShoppingItemDto {
   @IsNotEmpty()
@@ -13,8 +8,12 @@ export class AddShoppingItemDto {
   @Matches(/^\d+(\.\d+)?$/)
   quantity!: string;
 
+  // Defaults to UNITE (bare count, no real unit) when omitted — same
+  // closed set recipe_ingredients.unit uses, so a hand-added item can
+  // still merge against a recipe-sourced one in
+  // ShoppingService.addIngredientsToList (see CLAUDE.md's Database
+  // section).
   @IsOptional()
-  @IsString()
-  @MaxLength(40)
-  unit?: string;
+  @IsEnum(Unit)
+  unit?: Unit;
 }
