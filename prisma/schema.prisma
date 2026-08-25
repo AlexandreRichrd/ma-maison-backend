@@ -52,8 +52,8 @@ model User {
 }
 
 model Invite {
-  id          String    @id @default(uuid()) @db.Uuid
-  householdId String    @map("household_id") @db.Uuid
+  id              String    @id @default(uuid()) @db.Uuid
+  householdId     String    @map("household_id") @db.Uuid
   // Null only for the invite the bootstrap command issues against an empty
   // database, before any user exists to be the inviter. Every other invite
   // is created by InvitesService.create() on behalf of a signed-in user, so
@@ -126,7 +126,7 @@ model ShoppingItem {
   listId         String   @map("list_id") @db.Uuid
   name           String
   quantity       Decimal  @db.Decimal
-  unit           String
+  unit           Unit
   checked        Boolean  @default(false)
   sourceRecipeId String?  @map("source_recipe_id") @db.Uuid
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -139,18 +139,45 @@ model ShoppingItem {
 }
 
 // ---------------------------------------------------------------------------
-// recipes domain: recipes, recipe_ingredients
+// recipes domain: recipes, recipe_ingredients, recipe_steps
 // ---------------------------------------------------------------------------
 
+// Closed set of measurement units, shared by recipe_ingredients.unit and
+// shopping_items.unit — see CLAUDE.md's Database section. UNITE is a bare
+// count with no real unit (e.g. "2 oignons"), what used to be an empty
+// string.
+enum Unit {
+  G
+  KG
+  ML
+  L
+  CUILLERE_A_CAFE
+  CUILLERE_A_SOUPE
+  PINCEE
+  GOUSSE
+  TRANCHE
+  SACHET
+  PAQUET
+  BOITE
+  POT
+  BOUTEILLE
+  TETE
+  DOUZAINE
+  MICHE
+  UNITE
+
+  @@map("unit")
+}
+
 model Recipe {
-  id           String   @id @default(uuid()) @db.Uuid
-  name         String
-  servings     Int
-  instructions String
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  servings  Int
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   ingredients  RecipeIngredient[]
+  steps        RecipeStep[]
   sourcedItems ShoppingItem[]
 
   @@map("recipes")
@@ -161,7 +188,7 @@ model RecipeIngredient {
   recipeId  String   @map("recipe_id") @db.Uuid
   name      String
   quantity  Decimal  @db.Decimal
-  unit      String
+  unit      Unit
   position  Int
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
@@ -169,6 +196,19 @@ model RecipeIngredient {
   recipe Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
 
   @@map("recipe_ingredients")
+}
+
+model RecipeStep {
+  id        String   @id @default(uuid()) @db.Uuid
+  recipeId  String   @map("recipe_id") @db.Uuid
+  text      String
+  position  Int
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  recipe Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@map("recipe_steps")
 }
 
 // ---------------------------------------------------------------------------
@@ -246,14 +286,14 @@ model ChoreSubtask {
 }
 
 model ChoreCompletion {
-  id      String  @id @default(uuid()) @db.Uuid
-  choreId String  @map("chore_id") @db.Uuid
-  userId  String  @map("user_id") @db.Uuid
+  id             String   @id @default(uuid()) @db.Uuid
+  choreId        String   @map("chore_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
   // NULL for a chore with no subtasks (current/original behaviour) — a
   // chore with subtasks has one completion row per subtask, never a
   // parent-level row of its own; "the whole chore is done" is always
   // derived (see cleaning.service.ts), not stored.
-  subtaskId String? @map("subtask_id") @db.Uuid
+  subtaskId      String?  @map("subtask_id") @db.Uuid
   // The calendar date the occurrence starts, anchor-aligned — NOT the
   // date the user happened to tick the box. For a WEEK-unit chore this is
   // always a Monday (the only date rotation.service.ts ever computes an

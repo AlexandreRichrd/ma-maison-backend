@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { IngredientsService } from '../recipes/ingredients.service';
 import { ApiError } from '../common/api-error';
 import { PrismaService } from '../prisma/prisma.service';
+import { Unit } from '@prisma/client';
 import type { ShoppingItem, ShoppingList } from '@prisma/client';
 import { AddIngredientsDto } from './dto/add-ingredients.dto';
 import { AddShoppingItemDto } from './dto/add-shopping-item.dto';
@@ -69,7 +70,7 @@ export class ShoppingService {
         listId,
         name: dto.name,
         quantity: dto.quantity,
-        unit: dto.unit ?? '',
+        unit: dto.unit ?? Unit.UNITE,
         checked: false,
       },
     });

@@ -434,9 +434,10 @@ is constructed — inject it, never `new PrismaClient()` elsewhere.
 | `email_verifications` | user_id, token, expires_at, consumed_at nullable |
 | `password_resets` | user_id, token, expires_at, consumed_at nullable — same shape as `email_verifications`, deliberately a separate table (see Authentication's Forgot / reset password) |
 | `shopping_lists` | name |
-| `shopping_items` | list_id, name, quantity, unit, checked, source_recipe_id nullable |
-| `recipes` | name, servings, instructions |
-| `recipe_ingredients` | recipe_id, name, quantity, unit, position |
+| `shopping_items` | list_id, name, quantity, unit (`Unit` enum), checked, source_recipe_id nullable |
+| `recipes` | name, servings |
+| `recipe_ingredients` | recipe_id, name, quantity, unit (`Unit` enum), position |
+| `recipe_steps` | recipe_id, text, position — an ordered child table, same shape as `recipe_ingredients`/`chore_subtasks`. Replaces the old free-text `recipes.instructions` column |
 | `chores` | name, frequency_unit (`DAY`\|`WEEK`), frequency_value, assignment_mode (`ROTATING`\|`PINNED`), anchor_date, anchor_user_id |
 | `chore_subtasks` | chore_id, label, position |
 | `chore_completions` | chore_id, user_id, subtask_id nullable, occurrence_date, completed_at |
@@ -469,6 +470,20 @@ This is the same schema the old Drizzle setup used — port it into
   must never remove items already on a list
 - Ingredient count on the recipe overview is an aggregate query
   (`_count`), not a stored counter column
+- `Unit` (`recipe_ingredients.unit`, `shopping_items.unit`) is a real DB
+  enum, not a validated string like `Measure.type` — units are a small,
+  real-world-bounded domain (unlike sensor types, which grow with new
+  hardware), worth the DB guarantee and a frontend `<Select>`'s
+  exhaustiveness over a string's flexibility. Both columns share the one
+  enum on purpose: `ShoppingService.addIngredientsToList` merges on unit
+  equality, so a hand-added shopping item and a recipe-sourced one must
+  speak the same closed vocabulary to ever merge
+- `RecipesService.update` replaces the *entire* `ingredients`/`steps` array
+  in one transaction when either is present in the `PATCH` body (delete
+  all, recreate with `position` from array index) — there's no per-row
+  ingredient/step endpoint the way chores have per-subtask ones. A recipe
+  is filled out and submitted as one document; reordering/adding/removing
+  rows is client-side state until submit
 - Foreign keys always declare `onDelete` explicitly
 - Schema changes: edit `schema.prisma`, then see the Migration history
   note below — `prisma migrate dev` cannot be trusted to apply cleanly
@@ -779,8 +794,6 @@ Do not build these unless explicitly asked:
 - Redesigning chore rotation or reminder assignees for more than two people
   — invites can technically create a third+ user today, but nothing
   downstream handles it (see Chore rotation)
-- Recipe creation/editing endpoints — recipes are seeded, not authored via
-  the API
 - Servings scaling of ingredient quantities
 - Store tags on shopping items
 - Push or in-app notifications (transactional invite/activation/password-reset
