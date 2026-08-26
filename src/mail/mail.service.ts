@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import nodemailer, { type Transporter } from 'nodemailer';
 
+import type { ClimateAlertDirection } from '../climate/climate-alert-trigger';
+
 @Injectable()
 export class MailService {
   private readonly transporter: Transporter | null;
@@ -78,5 +80,33 @@ export class MailService {
       'Réinitialise ton mot de passe Hearth',
       `Une réinitialisation de mot de passe a été demandée pour ce compte.\n\nChoisis un nouveau mot de passe ici : ${link}\n\nCe lien expire dans 1 heure. Si tu n'es pas à l'origine de cette demande, ignore cet email.`,
     );
+  }
+
+  async sendClimateAlertEmail(
+    email: string,
+    alert: {
+      direction: ClimateAlertDirection;
+      indoorTemp: number;
+      outdoorTemp: number;
+    },
+  ): Promise<void> {
+    const indoor = alert.indoorTemp.toFixed(1);
+    const outdoor = alert.outdoorTemp.toFixed(1);
+    const delta = Math.abs(alert.indoorTemp - alert.outdoorTemp).toFixed(1);
+    const readings = `Intérieur : ${indoor}°C — Extérieur : ${outdoor}°C (écart de ${delta}°C).`;
+
+    if (alert.direction === 'cool_down') {
+      await this.send(
+        email,
+        "Il fait plus frais dehors qu'à l'intérieur",
+        `${readings}\n\nC'est peut-être le bon moment pour ouvrir une fenêtre et faire entrer l'air frais.`,
+      );
+    } else {
+      await this.send(
+        email,
+        'Il commence à faire plus chaud dehors',
+        `${readings}\n\nPense à refermer les fenêtres pour garder la fraîcheur à l'intérieur.`,
+      );
+    }
   }
 }
