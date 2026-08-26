@@ -87,6 +87,9 @@ src/
     paris-time.util.ts          # Europe/Paris day-boundary math (luxon) — see Climate
     backfill-daily-summary.ts   # npm run climate:backfill-summary -- <date> ..., see Climate
     device-auth.guard.ts    # static bearer token, not user JWT — see Climate
+    climate-alert-trigger.ts         # pure cool-down/close-up trigger fn — see Climate alerts
+    climate-alert-trigger.service.ts # wires the trigger fn to ingest events + Prisma
+    climate-alert-mail.listener.ts   # emails both household users on a fired alert
   common/
     dto/                    # shared DTOs (pagination, etc.) if any emerge
     filters/                # exception filters -> consistent error shape
@@ -419,6 +422,61 @@ window.
   `cleaning`'s `IsIsoDate` validator and `parseIsoDate()` (see Chore
   rotation's UTC-date note) rather than a second copy of the same date
   handling.
+
+### Climate alerts
+
+`ClimateAlertTriggerService` (issue #9) notifies by email when it's worth
+opening or closing windows — driven by `ClimateService.ingest()`'s existing
+`climate.measures.ingested` event, not a second polling read path.
+
+- **Trigger logic lives in `climate-alert-trigger.ts`**, a pure function
+  (`evaluateClimateAlert`) taking the current state, a reading, and config,
+  and returning the next state plus which direction (if any) fired — no
+  Prisma/event-emitter access, tested in isolation the same way
+  `broadcast-selection.ts` is.
+- **Two independent hysteresis (Schmitt-trigger) gates**, both required for
+  the cool-down direction: `thermalZone` (`cool`/`neutral`/`warm`) on
+  `indoor - outdoor`, entering/leaving each side `hysteresisC` apart from
+  `±marginC`; `comfortZone` (`comfortable`/`uncomfortable`) on indoor
+  temperature alone around `indoorThresholdC`. `cool_down` fires only when
+  both `thermalZone === 'cool'` and `comfortZone === 'uncomfortable'`;
+  `close_up` fires on `thermalZone === 'warm'` alone — closing up doesn't
+  need the comfort gate, since outside being warmer than inside is worth
+  acting on regardless of how hot indoor currently is.
+- **One notification per crossing**: a direction fires the moment it
+  becomes active (a fresh crossing), then suppresses further fires while
+  continuously active until either `CLIMATE_ALERT_COOLDOWN_MINUTES` elapses
+  (a repeat reminder, in case the first email was missed) or the direction
+  goes inactive and re-activates later (a new crossing, which always fires
+  immediately regardless of the cooldown clock).
+- **Outdoor readings are smoothed** over the last 5 samples (roughly 5
+  minutes at the Pi's ~1/minute cadence) before evaluation — the outdoor
+  sensor isn't in a Stevenson screen yet, so a direct-sun reading can spike
+  several degrees within minutes and would otherwise cause a false
+  `close_up` or mask a real `cool_down` window. Revisit once the screen is
+  installed. Indoor readings aren't smoothed — that sensor isn't exposed to
+  direct sun.
+- **Config is env vars** (`CLIMATE_ALERT_MARGIN_C`, `_HYSTERESIS_C`,
+  `_INDOOR_THRESHOLD_C`, `_COOLDOWN_MINUTES`), not a settings-table row —
+  same choice as `CLIMATE_INGEST_TOKEN`/`CLIMATE_SUMMARY_RETENTION_DAYS`:
+  there's no UI to edit these at runtime, so a redeploy to change one is an
+  acceptable cost. See `.env.example` for defaults.
+- **Channel-agnostic by design**: the trigger service emits
+  `climate.alert.triggered` (`ClimateAlertEvent`: direction + readings);
+  `ClimateAlertMailListener` is the only listener today, sending through
+  `MailService`. Adding push/SMS later is another `@OnEvent` listener, no
+  change to the trigger service itself.
+- **In-memory state**, same reasoning as `ClimateGateway`'s
+  `lastBroadcastAt` (single process, no scale problem to solve yet):
+  resets on restart, so a crossing already in progress before a restart can
+  fire again immediately after. Acceptable at this app's scale.
+- **Open questions resolved**: both household users get the email — no
+  per-user notification preference exists or is planned, consistent with
+  this being a two-user app; there's no snooze/disable-for-today control,
+  and none is planned unless a real need shows up (see Not in scope yet);
+  no explicit time-window suppression (e.g. blackout at 3am) — the indoor-
+  comfort gate already prevents pointless overnight/winter firing in
+  practice, per the issue's own reasoning.
 
 ## Database
 
