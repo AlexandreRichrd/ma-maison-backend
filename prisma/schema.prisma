@@ -23,23 +23,57 @@ model Household {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  users   User[]
-  invites Invite[]
+  users    User[]
+  invites  Invite[]
+  settings HouseholdSettings?
 
   @@map("households")
 }
 
+// One row per household (in practice, at most one row ever, since this app
+// is single-household), created lazily on the first PATCH /settings rather
+// than by bootstrap-household.ts — see SettingsService.getEffective(),
+// which falls back to hardcoded defaults when this row doesn't exist yet, so
+// a fresh install behaves exactly as it did when these were env vars. See
+// CLAUDE.md's Climate alerts section (issue #11) for why this exists as a
+// typed table rather than a KV settings store or columns on Household.
+model HouseholdSettings {
+  householdId String @id @map("household_id") @db.Uuid
+
+  climateAlertEnabled          Boolean @default(true) @map("climate_alert_enabled")
+  climateAlertMarginC          Float   @default(0.5) @map("climate_alert_margin_c")
+  climateAlertIndoorThresholdC Float   @default(24) @map("climate_alert_indoor_threshold_c")
+  climateAlertCooldownMinutes  Int     @default(120) @map("climate_alert_cooldown_minutes")
+  // CLIMATE_ALERT_HYSTERESIS_C stays an env var, not a column here — see
+  // CLAUDE.md's Climate alerts section: a tuning knob for false-positive/
+  // flap behaviour, not something a household member would reasonably want
+  // to change from the UI.
+  climateSummaryRetentionDays  Int     @default(7) @map("climate_summary_retention_days")
+
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@map("household_settings")
+}
+
 model User {
-  id              String    @id @default(uuid()) @db.Uuid
-  householdId     String    @map("household_id") @db.Uuid
-  email           String    @unique
-  passwordHash    String    @map("password_hash")
-  name            String
-  avatarKey       String    @map("avatar_key")
+  id                   String    @id @default(uuid()) @db.Uuid
+  householdId          String    @map("household_id") @db.Uuid
+  email                String    @unique
+  passwordHash         String    @map("password_hash")
+  name                 String
+  avatarKey            String    @map("avatar_key")
   // Null until the /activate link is clicked. Login is refused until then.
-  emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(6)
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  emailVerifiedAt      DateTime? @map("email_verified_at") @db.Timestamptz(6)
+  // Whether ClimateAlertMailListener emails this user on a fired alert —
+  // the one per-user setting in issue #11, everything else being
+  // household-wide (see HouseholdSettings). Defaults true so a fresh
+  // install and every existing user keep today's "everyone gets alerts"
+  // behaviour unchanged.
+  receiveClimateAlerts Boolean   @default(true) @map("receive_climate_alerts")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   household          Household           @relation(fields: [householdId], references: [id], onDelete: Cascade)
   choreCompletions   ChoreCompletion[]
