@@ -9,9 +9,15 @@ import { PrismaService } from '../src/prisma/prisma.service';
 
 type LoginBody = { accessToken: string };
 type HouseholdMeBody = {
-  users: { id: string; name: string; passwordHash?: string }[];
+  users: {
+    id: string;
+    name: string;
+    passwordHash?: string;
+    receiveClimateAlerts: boolean;
+  }[];
   memberOrder: string[];
 };
+type ErrorBody = { errors: { field: string; code: string }[] };
 
 describe('Households (e2e)', () => {
   let app: INestApplication<App>;
@@ -19,6 +25,7 @@ describe('Households (e2e)', () => {
   let accessToken: string;
   let firstId: string;
   let secondId: string;
+  let outsiderId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -64,6 +71,21 @@ describe('Households (e2e)', () => {
       data: { memberOrder: [second.id, first.id] },
     });
 
+    const otherHousehold = await prisma.household.create({
+      data: { memberOrder: [] },
+    });
+    const outsider = await prisma.user.create({
+      data: {
+        householdId: otherHousehold.id,
+        email: 'outsider@example.com',
+        passwordHash,
+        name: 'Outsider',
+        avatarKey: 'outsider',
+        emailVerifiedAt: new Date(),
+      },
+    });
+    outsiderId = outsider.id;
+
     const loginRes = await request(app.getHttpServer())
       .post('/auth/login')
       .send({ email: 'mia@example.com', password: 'whatever123' })
@@ -91,5 +113,69 @@ describe('Households (e2e)', () => {
       [firstId, secondId].sort(),
     );
     expect(body.users.every((u) => u.passwordHash === undefined)).toBe(true);
+    expect(body.users.every((u) => u.receiveClimateAlerts === true)).toBe(
+      true,
+    );
+  });
+
+  describe('PATCH /households/me/members/:userId/notification-preferences', () => {
+    it('rejects unauthenticated requests', async () => {
+      await request(app.getHttpServer())
+        .patch(`/households/me/members/${secondId}/notification-preferences`)
+        .send({ receiveClimateAlerts: false })
+        .expect(401);
+    });
+
+    it("updates another household member's flag", async () => {
+      await request(app.getHttpServer())
+        .patch(`/households/me/members/${secondId}/notification-preferences`)
+        .set({ Authorization: `Bearer ${accessToken}` })
+        .send({ receiveClimateAlerts: false })
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .get('/households/me')
+        .set({ Authorization: `Bearer ${accessToken}` })
+        .expect(200);
+      const body = res.body as HouseholdMeBody;
+      expect(
+        body.users.find((u) => u.id === secondId)?.receiveClimateAlerts,
+      ).toBe(false);
+
+      // Restore, so this test doesn't affect the others.
+      await request(app.getHttpServer())
+        .patch(`/households/me/members/${secondId}/notification-preferences`)
+        .set({ Authorization: `Bearer ${accessToken}` })
+        .send({ receiveClimateAlerts: true })
+        .expect(200);
+    });
+
+    it('rejects a userId outside the caller household', async () => {
+      const res = await request(app.getHttpServer())
+        .patch(
+          `/households/me/members/${outsiderId}/notification-preferences`,
+        )
+        .set({ Authorization: `Bearer ${accessToken}` })
+        .send({ receiveClimateAlerts: false })
+        .expect(400);
+      expect((res.body as ErrorBody).errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'userId', code: 'invalid_id' }),
+        ]),
+      );
+    });
+
+    it('rejects a non-boolean receiveClimateAlerts', async () => {
+      const res = await request(app.getHttpServer())
+        .patch(`/households/me/members/${secondId}/notification-preferences`)
+        .set({ Authorization: `Bearer ${accessToken}` })
+        .send({ receiveClimateAlerts: 'nope' })
+        .expect(400);
+      expect((res.body as ErrorBody).errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'receiveClimateAlerts' }),
+        ]),
+      );
+    });
   });
 });
