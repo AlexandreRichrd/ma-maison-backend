@@ -42,6 +42,8 @@ describe('SettingsService', () => {
           climateAlertIndoorThresholdC: 22,
           climateAlertCooldownMinutes: 60,
           climateSummaryRetentionDays: 14,
+          indoorSensorLabel: 'Salon',
+          outdoorSensorLabel: 'Jardin',
         },
       });
 
@@ -51,6 +53,8 @@ describe('SettingsService', () => {
         climateAlertIndoorThresholdC: 22,
         climateAlertCooldownMinutes: 60,
         climateSummaryRetentionDays: 14,
+        indoorSensorLabel: 'Salon',
+        outdoorSensorLabel: 'Jardin',
       });
     });
   });
@@ -88,6 +92,39 @@ describe('SettingsService', () => {
         climateAlertIndoorThresholdC: 22,
         climateAlertCooldownMinutes: 60,
         climateSummaryRetentionDays: 14,
+        indoorSensorLabel: null,
+        outdoorSensorLabel: null,
+      });
+    });
+
+    it('sets a sensor label', async () => {
+      await seedHousehold();
+
+      const result = await settings.update({ indoorSensorLabel: 'Salon' });
+
+      expect(result).toEqual({
+        ...DEFAULT_SETTINGS,
+        indoorSensorLabel: 'Salon',
+      });
+    });
+
+    it('clears a sensor label back to default via an empty string, without touching the other one', async () => {
+      const household = await seedHousehold();
+      await prisma.householdSettings.create({
+        data: {
+          ...DEFAULT_SETTINGS,
+          householdId: household.id,
+          indoorSensorLabel: 'Salon',
+          outdoorSensorLabel: 'Jardin',
+        },
+      });
+
+      const result = await settings.update({ indoorSensorLabel: '' });
+
+      expect(result).toEqual({
+        ...DEFAULT_SETTINGS,
+        indoorSensorLabel: null,
+        outdoorSensorLabel: 'Jardin',
       });
     });
   });

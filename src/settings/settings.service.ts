@@ -10,6 +10,11 @@ export type EffectiveSettings = {
   climateAlertIndoorThresholdC: number;
   climateAlertCooldownMinutes: number;
   climateSummaryRetentionDays: number;
+  // null means "no household-chosen label yet" — the frontend falls back
+  // to its own hardcoded default (see settings-api.server.ts's
+  // resolveSensorLabel() in my-home, issue #12).
+  indoorSensorLabel: string | null;
+  outdoorSensorLabel: string | null;
 };
 
 // Same defaults the four migrated env vars used to fall back to (see
@@ -22,6 +27,8 @@ export const DEFAULT_SETTINGS: EffectiveSettings = {
   climateAlertIndoorThresholdC: 24,
   climateAlertCooldownMinutes: 120,
   climateSummaryRetentionDays: 7,
+  indoorSensorLabel: null,
+  outdoorSensorLabel: null,
 };
 
 // This app is single-household (see CLAUDE.md) — getEffective() and
@@ -60,15 +67,34 @@ export class SettingsService {
     const current = household.settings
       ? toEffectiveSettings(household.settings)
       : DEFAULT_SETTINGS;
-    const merged: EffectiveSettings = { ...current, ...dto };
+    // An empty-string label means "clear the override back to default".
+    // The conditional spreads below only add the key at all when the DTO
+    // actually provided it — an object literal with `key: undefined`
+    // would still set that key (overwriting `current`'s real value with
+    // undefined), unlike `dto` itself, whose absent optional fields are
+    // genuinely missing keys, not present-with-undefined ones.
+    const normalized = {
+      ...dto,
+      ...(dto.indoorSensorLabel !== undefined && {
+        indoorSensorLabel: emptyToNull(dto.indoorSensorLabel),
+      }),
+      ...(dto.outdoorSensorLabel !== undefined && {
+        outdoorSensorLabel: emptyToNull(dto.outdoorSensorLabel),
+      }),
+    };
+    const merged: EffectiveSettings = { ...current, ...normalized };
 
     const row = await this.prisma.householdSettings.upsert({
       where: { householdId: household.id },
       create: { householdId: household.id, ...merged },
-      update: { ...dto },
+      update: { ...normalized },
     });
     return toEffectiveSettings(row);
   }
+}
+
+function emptyToNull(value: string | undefined): string | null | undefined {
+  return value === '' ? null : value;
 }
 
 function toEffectiveSettings(row: HouseholdSettings): EffectiveSettings {
@@ -78,5 +104,7 @@ function toEffectiveSettings(row: HouseholdSettings): EffectiveSettings {
     climateAlertIndoorThresholdC: row.climateAlertIndoorThresholdC,
     climateAlertCooldownMinutes: row.climateAlertCooldownMinutes,
     climateSummaryRetentionDays: row.climateSummaryRetentionDays,
+    indoorSensorLabel: row.indoorSensorLabel,
+    outdoorSensorLabel: row.outdoorSensorLabel,
   };
 }

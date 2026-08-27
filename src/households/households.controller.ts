@@ -9,6 +9,7 @@ import {
 
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { JwtPayload } from '../auth/jwt.strategy';
+import { UpdateMemberOrderDto } from './dto/update-member-order.dto';
 import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
 import { HouseholdsService } from './households.service';
 
@@ -31,5 +32,15 @@ export class HouseholdsController {
     @Body() dto: UpdateNotificationPreferencesDto,
   ) {
     return this.households.updateNotificationPreferences(user.sub, userId, dto);
+  }
+
+  // Rejects a partial or malformed reordering — see
+  // HouseholdsService.updateMemberOrder()'s permutation check.
+  @Patch('me/member-order')
+  updateMemberOrder(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateMemberOrderDto,
+  ) {
+    return this.households.updateMemberOrder(user.sub, dto);
   }
 }
