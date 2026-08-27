@@ -65,7 +65,8 @@ src/
     jwt-auth.guard.ts       # applied via a global APP_GUARD, not per-route
     invites.controller.ts   # POST /invites (create), scoped to signed-in user
   households/
-    households.controller.ts  # GET /households/me — users + member_order
+    households.controller.ts  # GET /households/me — users + member_order; PATCH
+                               #   /households/me/members/:userId/notification-preferences
   shopping/
     shopping.controller.ts    # lists + items
     shopping.service.ts
@@ -89,7 +90,10 @@ src/
     device-auth.guard.ts    # static bearer token, not user JWT — see Climate
     climate-alert-trigger.ts         # pure cool-down/close-up trigger fn — see Climate alerts
     climate-alert-trigger.service.ts # wires the trigger fn to ingest events + Prisma
-    climate-alert-mail.listener.ts   # emails both household users on a fired alert
+    climate-alert-mail.listener.ts   # emails users with receiveClimateAlerts set, on a fired alert
+  settings/
+    settings.controller.ts  # GET/PATCH /settings — household_settings, see Climate alerts
+    settings.service.ts       # getEffective()/update(), fresh-read (no cache), see Climate alerts
   common/
     dto/                    # shared DTOs (pagination, etc.) if any emerge
     filters/                # exception filters -> consistent error shape
@@ -402,10 +406,11 @@ window.
   separate "was there any data" branch.
 - **Retention**: `purgeOlderThan(retentionDays)` deletes `measures` rows
   older than `retentionDays` Paris calendar days back from today.
-  `CLIMATE_SUMMARY_RETENTION_DAYS` (default `7`) controls the window, same
-  `process.env` pattern as `CLIMATE_INGEST_TOKEN` — see `.env.example`.
-  Independent of which day `summarizeDay()` just processed, so a missed
-  night doesn't shrink the window.
+  `household_settings.climate_summary_retention_days` (default `7`)
+  controls the window — read via `SettingsService.getEffective()` once per
+  nightly run (issue #11 moved this off `CLIMATE_SUMMARY_RETENTION_DAYS`;
+  see Climate alerts). Independent of which day `summarizeDay()` just
+  processed, so a missed night doesn't shrink the window.
 - **Backfill**: `src/climate/backfill-daily-summary.ts` (run via `npm run
   climate:backfill-summary -- <date> [<date> ...]`, or directly as `node
   dist/climate/backfill-daily-summary.js <date> ...`) calls
@@ -445,9 +450,10 @@ opening or closing windows — driven by `ClimateService.ingest()`'s existing
   acting on regardless of how hot indoor currently is.
 - **One notification per crossing**: a direction fires the moment it
   becomes active (a fresh crossing), then suppresses further fires while
-  continuously active until either `CLIMATE_ALERT_COOLDOWN_MINUTES` elapses
-  (a repeat reminder, in case the first email was missed) or the direction
-  goes inactive and re-activates later (a new crossing, which always fires
+  continuously active until either the cooldown period
+  (`household_settings.climate_alert_cooldown_minutes`) elapses (a repeat
+  reminder, in case the first email was missed) or the direction goes
+  inactive and re-activates later (a new crossing, which always fires
   immediately regardless of the cooldown clock).
 - **Outdoor readings are smoothed** over the last 5 samples (roughly 5
   minutes at the Pi's ~1/minute cadence) before evaluation — the outdoor
@@ -456,11 +462,20 @@ opening or closing windows — driven by `ClimateService.ingest()`'s existing
   `close_up` or mask a real `cool_down` window. Revisit once the screen is
   installed. Indoor readings aren't smoothed — that sensor isn't exposed to
   direct sun.
-- **Config is env vars** (`CLIMATE_ALERT_MARGIN_C`, `_HYSTERESIS_C`,
-  `_INDOOR_THRESHOLD_C`, `_COOLDOWN_MINUTES`), not a settings-table row —
-  same choice as `CLIMATE_INGEST_TOKEN`/`CLIMATE_SUMMARY_RETENTION_DAYS`:
-  there's no UI to edit these at runtime, so a redeploy to change one is an
-  acceptable cost. See `.env.example` for defaults.
+- **Config is a settings-table row for everything but hysteresis** (issue
+  #11): margin, indoor threshold, cooldown, and an enabled/disabled switch
+  live in `household_settings`, read via `SettingsService.getEffective()` —
+  called fresh on every ingested measurement (`ClimateAlertTriggerService`
+  never caches this at startup), so a saved change takes effect on the next
+  measurement, no redeploy or restart needed. `climateAlertEnabled: false`
+  skips evaluation entirely (no state mutation, so re-enabling later resumes
+  from wherever the crossing state was left). `CLIMATE_ALERT_HYSTERESIS_C`
+  alone stays an env var — a flap-prevention tuning knob, not something a
+  household member would reasonably want to change from the UI. See
+  `.env.example` for its default, and `SettingsService`'s `DEFAULT_SETTINGS`
+  for the others' (identical to what these were as env vars, so a fresh
+  install or a household that's never opened the settings page behaves
+  unchanged).
 - **Channel-agnostic by design**: the trigger service emits
   `climate.alert.triggered` (`ClimateAlertEvent`: direction + readings);
   `ClimateAlertMailListener` is the only listener today, sending through
@@ -470,13 +485,22 @@ opening or closing windows — driven by `ClimateService.ingest()`'s existing
   `lastBroadcastAt` (single process, no scale problem to solve yet):
   resets on restart, so a crossing already in progress before a restart can
   fire again immediately after. Acceptable at this app's scale.
-- **Open questions resolved**: both household users get the email — no
-  per-user notification preference exists or is planned, consistent with
-  this being a two-user app; there's no snooze/disable-for-today control,
-  and none is planned unless a real need shows up (see Not in scope yet);
-  no explicit time-window suppression (e.g. blackout at 3am) — the indoor-
-  comfort gate already prevents pointless overnight/winter firing in
-  practice, per the issue's own reasoning.
+- **Open questions resolved**: which household members get the email is now
+  a per-user preference, `users.receive_climate_alerts` (default `true`,
+  preserving the original "everyone gets alerts" behaviour), editable via
+  `PATCH /households/me/members/:userId/notification-preferences` (issue
+  #11) — `ClimateAlertMailListener` filters to `receiveClimateAlerts: true`
+  rather than emailing every user unconditionally; there's still no
+  snooze/disable-for-today control (the household-wide `climateAlertEnabled`
+  switch added by issue #11 covers "off entirely", not "off until
+  tomorrow"), and none is planned unless a real need shows up (see Not in
+  scope yet); no explicit time-window suppression (e.g. blackout at 3am) —
+  the indoor-comfort gate already prevents pointless overnight/winter
+  firing in practice, per the issue's own reasoning.
+- **No audit trail on settings changes** (issue #11's storage-shape
+  decision) — `household_settings.updated_at` is the only history kept,
+  last-write-wins. Fine for a two-person household; revisit only if a real
+  need shows up.
 
 ## Database
 
@@ -487,7 +511,8 @@ is constructed — inject it, never `new PrismaClient()` elsewhere.
 | Table | Notes |
 |---|---|
 | `households` | single row; holds `member_order` for stable rotation |
-| `users` | email, password_hash, household_id, name, avatar_key, email_verified_at nullable — see Authentication |
+| `users` | email, password_hash, household_id, name, avatar_key, email_verified_at nullable, receive_climate_alerts (default true) — see Authentication, Climate alerts |
+| `household_settings` | one row per household (in practice, at most one row ever), created lazily on first `PATCH /settings` — climate_alert_enabled/margin_c/indoor_threshold_c/cooldown_minutes, climate_summary_retention_days, updated_at. See Climate alerts |
 | `invites` | household_id, invited_by_user_id, email, token, expires_at, accepted_at nullable |
 | `email_verifications` | user_id, token, expires_at, consumed_at nullable |
 | `password_resets` | user_id, token, expires_at, consumed_at nullable — same shape as `email_verifications`, deliberately a separate table (see Authentication's Forgot / reset password) |
