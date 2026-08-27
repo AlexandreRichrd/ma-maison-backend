@@ -1,0 +1,82 @@
+import { Injectable } from '@nestjs/common';
+import type { HouseholdSettings } from '@prisma/client';
+
+import { PrismaService } from '../prisma/prisma.service';
+import { UpdateSettingsDto } from './dto/update-settings.dto';
+
+export type EffectiveSettings = {
+  climateAlertEnabled: boolean;
+  climateAlertMarginC: number;
+  climateAlertIndoorThresholdC: number;
+  climateAlertCooldownMinutes: number;
+  climateSummaryRetentionDays: number;
+};
+
+// Same defaults the four migrated env vars used to fall back to (see
+// CLAUDE.md's Climate alerts section) — a fresh install, or any household
+// that's never opened the settings page, must behave identically to
+// before issue #11.
+export const DEFAULT_SETTINGS: EffectiveSettings = {
+  climateAlertEnabled: true,
+  climateAlertMarginC: 0.5,
+  climateAlertIndoorThresholdC: 24,
+  climateAlertCooldownMinutes: 120,
+  climateSummaryRetentionDays: 7,
+};
+
+// This app is single-household (see CLAUDE.md) — getEffective() and
+// update() both resolve *the* household directly rather than taking a
+// householdId: there's exactly one, and the background callers
+// (ClimateAlertTriggerService per ingested measurement,
+// ClimateSummaryService's nightly cron) have no per-request household to
+// scope by. Same assumption bootstrap-household.ts already makes.
+@Injectable()
+export class SettingsService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  // No row yet (household never opened the settings page) -> hardcoded
+  // defaults, not an error. Called fresh on every read — see
+  // ClimateAlertTriggerService/ClimateSummaryService for why this needs to
+  // be a live DB read rather than something cached at startup.
+  async getEffective(): Promise<EffectiveSettings> {
+    const household = await this.prisma.household.findFirst({
+      include: { settings: true },
+    });
+    return household?.settings
+      ? toEffectiveSettings(household.settings)
+      : DEFAULT_SETTINGS;
+  }
+
+  // Upserts: the row may not exist yet. On create, unset DTO fields fall
+  // back to the current effective (i.e. default) values rather than the
+  // column defaults directly, so behaviour is identical either way; on
+  // update, an unset DTO field is left out of `data` entirely (Prisma
+  // treats `undefined` as "don't touch this column"), preserving whatever
+  // that field was already set to.
+  async update(dto: UpdateSettingsDto): Promise<EffectiveSettings> {
+    const household = await this.prisma.household.findFirstOrThrow({
+      include: { settings: true },
+    });
+    const current = household.settings
+      ? toEffectiveSettings(household.settings)
+      : DEFAULT_SETTINGS;
+    const merged: EffectiveSettings = { ...current, ...dto };
+
+    const row = await this.prisma.householdSettings.upsert({
+      where: { householdId: household.id },
+      create: { householdId: household.id, ...merged },
+      update: { ...dto },
+    });
+    return toEffectiveSettings(row);
+  }
+}
+
+function toEffectiveSettings(row: HouseholdSettings): EffectiveSettings {
+  return {
+    climateAlertEnabled: row.climateAlertEnabled,
+    climateAlertMarginC: row.climateAlertMarginC,
+    climateAlertIndoorThresholdC: row.climateAlertIndoorThresholdC,
+    climateAlertCooldownMinutes: row.climateAlertCooldownMinutes,
+    climateSummaryRetentionDays: row.climateSummaryRetentionDays,
+  };
+}

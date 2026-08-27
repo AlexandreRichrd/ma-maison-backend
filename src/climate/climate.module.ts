@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { MailModule } from '../mail/mail.module';
+import { SettingsModule } from '../settings/settings.module';
 import { ClimateAlertMailListener } from './climate-alert-mail.listener';
 import { ClimateAlertTriggerService } from './climate-alert-trigger.service';
 import { ClimateController } from './climate.controller';
@@ -18,7 +19,7 @@ import { ClimateService } from './climate.service';
 // CLAUDE.md's Climate section). Device registration is still unbuilt — see
 // CLAUDE.md's Not in scope yet.
 @Module({
-  imports: [MailModule],
+  imports: [MailModule, SettingsModule],
   controllers: [ClimateController],
   providers: [
     ClimateService,

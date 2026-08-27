@@ -7,9 +7,9 @@ import type { ClimateAlertEvent } from './events/climate-alert.event';
 
 /**
  * The only channel wired up today for 'climate.alert.triggered' (see
- * ClimateAlertTriggerService and CLAUDE.md's Climate alerts section: both
- * household members get the email, there being no per-user notification
- * preference in this single-household, two-user app).
+ * ClimateAlertTriggerService and CLAUDE.md's Climate alerts section) — only
+ * users with receiveClimateAlerts set (default true, per issue #11) get the
+ * email.
  */
 @Injectable()
 export class ClimateAlertMailListener {
@@ -22,7 +22,10 @@ export class ClimateAlertMailListener {
 
   @OnEvent('climate.alert.triggered')
   async handleClimateAlert(event: ClimateAlertEvent): Promise<void> {
-    const users = await this.prisma.user.findMany({ select: { email: true } });
+    const users = await this.prisma.user.findMany({
+      where: { receiveClimateAlerts: true },
+      select: { email: true },
+    });
     await Promise.all(
       users.map((user) =>
         this.mail.sendClimateAlertEmail(user.email, event).catch((error) => {

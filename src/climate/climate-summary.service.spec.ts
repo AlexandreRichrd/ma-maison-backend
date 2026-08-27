@@ -1,4 +1,5 @@
 import { PrismaService } from '../prisma/prisma.service';
+import { SettingsService } from '../settings/settings.service';
 import { ClimateSummaryService } from './climate-summary.service';
 
 describe('ClimateSummaryService', () => {
@@ -16,7 +17,7 @@ describe('ClimateSummaryService', () => {
   beforeEach(async () => {
     await prisma.$executeRaw`TRUNCATE measures RESTART IDENTITY CASCADE`;
     await prisma.$executeRaw`TRUNCATE daily_summaries RESTART IDENTITY CASCADE`;
-    service = new ClimateSummaryService(prisma);
+    service = new ClimateSummaryService(prisma, new SettingsService(prisma));
   });
 
   async function seedMeasures(

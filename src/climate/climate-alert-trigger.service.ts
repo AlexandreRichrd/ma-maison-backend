@@ -3,6 +3,10 @@ import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  SettingsService,
+  type EffectiveSettings,
+} from '../settings/settings.service';
+import {
   type ClimateAlertConfig,
   type ClimateAlertState,
   INITIAL_CLIMATE_ALERT_STATE,
@@ -24,10 +28,12 @@ const OUTDOOR_DEVICE = 'capteur-exterieur';
 // the Pi's roughly-1/minute forwarding cadence.
 const OUTDOOR_SMOOTHING_SAMPLES = 5;
 
-const DEFAULT_MARGIN_C = 0.5;
+// Margin/indoor-threshold/cooldown/enabled now live in household_settings
+// (see SettingsService, issue #11) — only hysteresis stays an env var, per
+// CLAUDE.md's Climate alerts section (a flap-prevention tuning knob, not
+// something a household member would reasonably want to change from the
+// UI).
 const DEFAULT_HYSTERESIS_C = 0.3;
-const DEFAULT_INDOOR_THRESHOLD_C = 24;
-const DEFAULT_COOLDOWN_MINUTES = 120;
 
 /**
  * Evaluates the cool-down/close-up window-alert trigger (issue #9) every
@@ -52,6 +58,7 @@ export class ClimateAlertTriggerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventEmitter2,
+    private readonly settings: SettingsService,
   ) {}
 
   @OnEvent('climate.measures.ingested')
@@ -63,6 +70,9 @@ export class ClimateAlertTriggerService {
           measure.deviceName === OUTDOOR_DEVICE),
     );
     if (!touchesRelevantTemp) return;
+
+    const effective = await this.settings.getEffective();
+    if (!effective.climateAlertEnabled) return;
 
     const [indoor, outdoorSamples] = await Promise.all([
       this.prisma.measure.findFirst({
@@ -87,7 +97,7 @@ export class ClimateAlertTriggerService {
     const result = evaluateClimateAlert(
       this.state,
       { indoorTemp, outdoorTemp, now: new Date() },
-      climateAlertConfig(),
+      climateAlertConfig(effective),
     );
     this.state = result.state;
 
@@ -103,24 +113,17 @@ export class ClimateAlertTriggerService {
   }
 }
 
-// Same validate-and-default-per-var pattern as climate-summary.service.ts's
-// retentionDays() — see CLAUDE.md's Climate alerts section for the env vars.
-function climateAlertConfig(): ClimateAlertConfig {
+// hysteresisC alone still comes from an env var (see the const above);
+// everything else comes from the settings row this call already fetched.
+function climateAlertConfig(effective: EffectiveSettings): ClimateAlertConfig {
   return {
-    marginC: positiveNumberEnv('CLIMATE_ALERT_MARGIN_C', DEFAULT_MARGIN_C),
+    marginC: effective.climateAlertMarginC,
     hysteresisC: positiveNumberEnv(
       'CLIMATE_ALERT_HYSTERESIS_C',
       DEFAULT_HYSTERESIS_C,
     ),
-    indoorThresholdC: positiveNumberEnv(
-      'CLIMATE_ALERT_INDOOR_THRESHOLD_C',
-      DEFAULT_INDOOR_THRESHOLD_C,
-    ),
-    cooldownMs:
-      positiveNumberEnv(
-        'CLIMATE_ALERT_COOLDOWN_MINUTES',
-        DEFAULT_COOLDOWN_MINUTES,
-      ) * 60_000,
+    indoorThresholdC: effective.climateAlertIndoorThresholdC,
+    cooldownMs: effective.climateAlertCooldownMinutes * 60_000,
   };
 }
 
