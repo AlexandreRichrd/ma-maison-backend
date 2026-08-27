@@ -14,6 +14,7 @@ import { MailModule } from './mail/mail.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RecipesModule } from './recipes/recipes.module';
 import { RemindersModule } from './reminders/reminders.module';
+import { SettingsModule } from './settings/settings.module';
 import { ShoppingModule } from './shopping/shopping.module';
 import { throttlerConfig } from './throttler.config';
 
@@ -31,6 +32,7 @@ import { throttlerConfig } from './throttler.config';
     CleaningModule,
     RecipesModule,
     RemindersModule,
+    SettingsModule,
     ClimateModule,
   ],
   controllers: [AppController],

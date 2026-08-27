@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 
 import { parseIsoDate } from '../cleaning/iso-date.util';
 import { PrismaService } from '../prisma/prisma.service';
+import { SettingsService } from '../settings/settings.service';
 import { KNOWN_MEASURE_TYPES } from './known-measure-types';
 import {
   PARIS_TIME_ZONE,
@@ -11,8 +12,6 @@ import {
   purgeCutoffUtc,
   yesterdayParisDate,
 } from './paris-time.util';
-
-const DEFAULT_RETENTION_DAYS = 7;
 
 type RawSummaryRow = {
   deviceName: string;
@@ -41,7 +40,10 @@ export type DailySummaryReading = {
 export class ClimateSummaryService {
   private readonly logger = new Logger(ClimateSummaryService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly settings: SettingsService,
+  ) {}
 
   // Runs just after Paris midnight, with a 10-minute buffer for any
   // still-in-flight reading from the day that just ended. Order matters:
@@ -64,7 +66,8 @@ export class ClimateSummaryService {
       );
       return;
     }
-    await this.purgeOlderThan(retentionDays());
+    const { climateSummaryRetentionDays } = await this.settings.getEffective();
+    await this.purgeOlderThan(climateSummaryRetentionDays);
   }
 
   // Aggregates one Europe/Paris calendar day's raw measures into
@@ -166,18 +169,4 @@ export class ClimateSummaryService {
       },
     });
   }
-}
-
-function retentionDays(): number {
-  const raw = process.env.CLIMATE_SUMMARY_RETENTION_DAYS;
-  if (!raw) {
-    return DEFAULT_RETENTION_DAYS;
-  }
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new Error(
-      `CLIMATE_SUMMARY_RETENTION_DAYS must be a positive integer, got '${raw}'`,
-    );
-  }
-  return parsed;
 }
