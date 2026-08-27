@@ -66,7 +66,8 @@ src/
     invites.controller.ts   # POST /invites (create), scoped to signed-in user
   households/
     households.controller.ts  # GET /households/me — users + member_order; PATCH
-                               #   /households/me/members/:userId/notification-preferences
+                               #   /households/me/members/:userId/notification-preferences;
+                               #   PATCH /households/me/member-order — see Household member order
   shopping/
     shopping.controller.ts    # lists + items
     shopping.service.ts
@@ -312,6 +313,29 @@ of old `chore_completions` rows when this happens, and none is attempted:
   to the other person after an `assignmentMode`/`anchorUserId` edit.
   Documented behavior, not a bug to fix here.
 
+## Households
+
+`households.member_order` decides display order everywhere ordering
+matters (Chore rotation's `[RotationUser, RotationUser]` tuple, the
+Cleaning/Dashboard two-column layout) — set once by `bootstrap-household.ts`
+and appended to on `POST /auth/register` (see Invite / register / activate),
+with no way to change it after that until issue #12's
+`PATCH /households/me/member-order`.
+
+- Body is `{ memberOrder: string[] }`. `UpdateMemberOrderDto` only checks
+  shape (a non-empty array of UUIDs) — the actual constraint, that it's
+  exactly a **permutation of the household's current members**, needs a DB
+  round trip and lives in `HouseholdsService.updateMemberOrder()`: same
+  length, no duplicates, every id a real current member, every current
+  member present. Anything partial or malformed (missing a member, an id
+  from another household, a duplicate) is rejected with `ApiError(400,
+  'memberOrder', 'invalid_member_order')`, never silently accepted or
+  partially applied.
+- No separate authorization check beyond household membership — any
+  signed-in household member can reorder for the household, same "no
+  per-user authorization boundary" reasoning as
+  `updateNotificationPreferences` (see Climate alerts).
+
 ## Reminders
 
 `GET /reminders` (`RemindersController.list()`) takes an optional `from`/
@@ -476,6 +500,15 @@ opening or closing windows — driven by `ClimateService.ingest()`'s existing
   for the others' (identical to what these were as env vars, so a fresh
   install or a household that's never opened the settings page behaves
   unchanged).
+- **Sensor display names** (issue #12) also live on `household_settings`
+  (`indoorSensorLabel`/`outdoorSensorLabel`, both nullable — `null` means
+  the frontend's own hardcoded default, not this API's concern) despite
+  having nothing to do with the alert trigger itself; they share the table
+  because both are small, household-wide, single-row config, and a second
+  table for two nullable strings wasn't worth it. `INDOOR_DEVICE`/
+  `OUTDOOR_DEVICE` (`'capteur-salon'`/`'capteur-exterieur'`) stay hardcoded
+  constants here — this API never renders a label, so it has no reason to
+  resolve device name to display name itself, only to store the override.
 - **Channel-agnostic by design**: the trigger service emits
   `climate.alert.triggered` (`ClimateAlertEvent`: direction + readings);
   `ClimateAlertMailListener` is the only listener today, sending through
@@ -512,7 +545,7 @@ is constructed — inject it, never `new PrismaClient()` elsewhere.
 |---|---|
 | `households` | single row; holds `member_order` for stable rotation |
 | `users` | email, password_hash, household_id, name, avatar_key, email_verified_at nullable, receive_climate_alerts (default true) — see Authentication, Climate alerts |
-| `household_settings` | one row per household (in practice, at most one row ever), created lazily on first `PATCH /settings` — climate_alert_enabled/margin_c/indoor_threshold_c/cooldown_minutes, climate_summary_retention_days, updated_at. See Climate alerts |
+| `household_settings` | one row per household (in practice, at most one row ever), created lazily on first `PATCH /settings` — climate_alert_enabled/margin_c/indoor_threshold_c/cooldown_minutes, climate_summary_retention_days, indoor/outdoor_sensor_label (nullable, issue #12), updated_at. See Climate alerts |
 | `invites` | household_id, invited_by_user_id, email, token, expires_at, accepted_at nullable |
 | `email_verifications` | user_id, token, expires_at, consumed_at nullable |
 | `password_resets` | user_id, token, expires_at, consumed_at nullable — same shape as `email_verifications`, deliberately a separate table (see Authentication's Forgot / reset password) |
