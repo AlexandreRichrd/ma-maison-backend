@@ -552,17 +552,25 @@ toggle) build on top of this and aren't done yet.
 
 - **Not user JWT auth, and not `DeviceAuthGuard`'s static bearer token
   either.** Amazon signs every request instead, so `AlexaSignatureGuard`
-  verifies `SignatureCertChainUrl`/`Signature` against the raw request body
-  (cert-chain fetch/validate against Amazon's root CA + RSA-SHA256 signature
-  + a 150-second timestamp tolerance) via the `alexa-verifier` npm package —
-  a small, focused package doing exactly this, chosen over hand-rolling
-  X.509 chain validation (meaningfully more security-sensitive code to get
-  subtly wrong) or pulling in the full `ask-sdk-core`/`ask-sdk-express-adapter`
-  framework (a whole request-routing/response-builder layer this endpoint
-  doesn't need). It's ESM-only, loaded via a dynamic `import()` in
-  `alexa-verifier.util.ts` — kept in its own file so
-  `alexa-signature.guard.spec.ts` can `jest.mock` it instead of mocking a
-  dynamic import directly. As defense-in-depth beyond Amazon's signature,
+  verifies `SignatureCertChainUrl`/`Signature-256` against the raw request
+  body (cert-chain fetch/validate against Amazon's root CA + RSA-SHA256
+  signature + a 150-second timestamp tolerance) via the `alexa-verifier` npm
+  package — a small, focused package doing exactly this, chosen over
+  hand-rolling X.509 chain validation (meaningfully more security-sensitive
+  code to get subtly wrong) or pulling in the full
+  `ask-sdk-core`/`ask-sdk-express-adapter` framework (a whole
+  request-routing/response-builder layer this endpoint doesn't need). It's
+  ESM-only, loaded via a dynamic `import()` in `alexa-verifier.util.ts` —
+  kept in its own file so `alexa-signature.guard.spec.ts` can `jest.mock` it
+  instead of mocking a dynamic import directly. **Read `Signature-256`
+  (SHA-256), never the legacy `Signature` header (SHA-1)** —
+  `alexa-verifier` hard-codes RSA-SHA256, so pairing it with the SHA-1
+  header produces the exact same generic "invalid signature" it returns for
+  an actually corrupted request: every real request fails identically, with
+  cert-chain fetch and the timestamp check both still passing, which is
+  what made this hard to diagnose the one time it happened for real — the
+  guard's diagnostic logging (see `diagnostics()`) exists because of that
+  incident. As defense-in-depth beyond Amazon's signature,
   the guard also checks the request's `applicationId` against
   `ALEXA_SKILL_ID`, the same "throw 500 if the required env var is missing"
   pattern as `DeviceAuthGuard`.

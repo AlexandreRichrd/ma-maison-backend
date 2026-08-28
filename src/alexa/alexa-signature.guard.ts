@@ -20,6 +20,16 @@ import type { RequestEnvelope } from './types/alexa.types';
  * ask-sdk) against the *raw* request bytes, plus checks the request is
  * addressed to this specific skill (ALEXA_SKILL_ID) as defense-in-depth on
  * top of Amazon's own signature.
+ *
+ * Reads the `Signature-256` header, not the legacy `Signature` header —
+ * `alexa-verifier` verifies with RSA-SHA256, and `Signature-256` is the
+ * SHA-256-signed value that pairs with it. `Signature` is SHA-1-signed;
+ * feeding it to an RSA-SHA256 verifier fails cryptographically on every
+ * request, every time — a real incident this guard's logging (see
+ * `diagnostics()`) narrowed down, since it produces the exact same generic
+ * "invalid signature" alexa-verifier returns for it as for an actual
+ * corrupted body, with none of the other checks (cert chain, timestamp)
+ * affected either way.
  */
 @Injectable()
 export class AlexaSignatureGuard implements CanActivate {
@@ -35,7 +45,7 @@ export class AlexaSignatureGuard implements CanActivate {
       .switchToHttp()
       .getRequest<RawBodyRequest<Request>>();
     const certChainUrl = request.headers['signaturecertchainurl'];
-    const signature = request.headers['signature'];
+    const signature = request.headers['signature-256'];
     const rawBody = request.rawBody;
 
     if (
@@ -87,7 +97,8 @@ export class AlexaSignatureGuard implements CanActivate {
     return JSON.stringify({
       hasSignatureCertChainUrlHeader:
         typeof request.headers['signaturecertchainurl'] === 'string',
-      hasSignatureHeader: typeof request.headers['signature'] === 'string',
+      hasSignature256Header:
+        typeof request.headers['signature-256'] === 'string',
       contentLengthHeader: request.headers['content-length'] ?? null,
       rawBodyDefined: rawBody !== undefined,
       rawBodyLength: rawBody?.length ?? null,
