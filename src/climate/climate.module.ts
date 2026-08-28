@@ -28,5 +28,6 @@ import { ClimateService } from './climate.service';
     ClimateAlertTriggerService,
     ClimateAlertMailListener,
   ],
+  exports: [ClimateService],
 })
 export class ClimateModule {}
