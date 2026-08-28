@@ -50,6 +50,16 @@ model HouseholdSettings {
   // to change from the UI.
   climateSummaryRetentionDays  Int     @default(7) @map("climate_summary_retention_days")
 
+  // Household-chosen display name per sensor role — null means "use the
+  // frontend's hardcoded default" (see settings-api.server.ts's
+  // resolveSensorLabel() in my-home, issue #12). Two nullable columns, not
+  // a device-name-keyed map: there are exactly two known sensor roles
+  // (INDOOR_DEVICE/OUTDOOR_DEVICE, currently duplicated as hardcoded
+  // constants in both repos), a small fixed set that doesn't justify a
+  // separate table or a jsonb blob.
+  indoorSensorLabel  String? @map("indoor_sensor_label")
+  outdoorSensorLabel String? @map("outdoor_sensor_label")
+
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)

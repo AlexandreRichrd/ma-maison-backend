@@ -113,9 +113,7 @@ describe('Households (e2e)', () => {
       [firstId, secondId].sort(),
     );
     expect(body.users.every((u) => u.passwordHash === undefined)).toBe(true);
-    expect(body.users.every((u) => u.receiveClimateAlerts === true)).toBe(
-      true,
-    );
+    expect(body.users.every((u) => u.receiveClimateAlerts === true)).toBe(true);
   });
 
   describe('PATCH /households/me/members/:userId/notification-preferences', () => {
@@ -152,9 +150,7 @@ describe('Households (e2e)', () => {
 
     it('rejects a userId outside the caller household', async () => {
       const res = await request(app.getHttpServer())
-        .patch(
-          `/households/me/members/${outsiderId}/notification-preferences`,
-        )
+        .patch(`/households/me/members/${outsiderId}/notification-preferences`)
         .set({ Authorization: `Bearer ${accessToken}` })
         .send({ receiveClimateAlerts: false })
         .expect(400);
@@ -174,6 +170,84 @@ describe('Households (e2e)', () => {
       expect((res.body as ErrorBody).errors).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ field: 'receiveClimateAlerts' }),
+        ]),
+      );
+    });
+  });
+
+  describe('PATCH /households/me/member-order', () => {
+    it('rejects unauthenticated requests', async () => {
+      await request(app.getHttpServer())
+        .patch('/households/me/member-order')
+        .send({ memberOrder: [firstId, secondId] })
+        .expect(401);
+    });
+
+    it('persists a valid reordering', async () => {
+      await request(app.getHttpServer())
+        .patch('/households/me/member-order')
+        .set({ Authorization: `Bearer ${accessToken}` })
+        .send({ memberOrder: [firstId, secondId] })
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .get('/households/me')
+        .set({ Authorization: `Bearer ${accessToken}` })
+        .expect(200);
+      expect((res.body as HouseholdMeBody).memberOrder).toEqual([
+        firstId,
+        secondId,
+      ]);
+
+      // Restore, so this test doesn't affect the others.
+      await request(app.getHttpServer())
+        .patch('/households/me/member-order')
+        .set({ Authorization: `Bearer ${accessToken}` })
+        .send({ memberOrder: [secondId, firstId] })
+        .expect(200);
+    });
+
+    it('rejects a reordering missing a current member', async () => {
+      const res = await request(app.getHttpServer())
+        .patch('/households/me/member-order')
+        .set({ Authorization: `Bearer ${accessToken}` })
+        .send({ memberOrder: [firstId] })
+        .expect(400);
+      expect((res.body as ErrorBody).errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: 'memberOrder',
+            code: 'invalid_member_order',
+          }),
+        ]),
+      );
+    });
+
+    it('rejects a reordering with an id from another household', async () => {
+      const res = await request(app.getHttpServer())
+        .patch('/households/me/member-order')
+        .set({ Authorization: `Bearer ${accessToken}` })
+        .send({ memberOrder: [firstId, outsiderId] })
+        .expect(400);
+      expect((res.body as ErrorBody).errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: 'memberOrder',
+            code: 'invalid_member_order',
+          }),
+        ]),
+      );
+    });
+
+    it('rejects a non-UUID entry', async () => {
+      const res = await request(app.getHttpServer())
+        .patch('/households/me/member-order')
+        .set({ Authorization: `Bearer ${accessToken}` })
+        .send({ memberOrder: ['not-a-uuid'] })
+        .expect(400);
+      expect((res.body as ErrorBody).errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'memberOrder' }),
         ]),
       );
     });

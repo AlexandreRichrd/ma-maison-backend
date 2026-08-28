@@ -15,6 +15,8 @@ type SettingsBody = {
   climateAlertIndoorThresholdC: number;
   climateAlertCooldownMinutes: number;
   climateSummaryRetentionDays: number;
+  indoorSensorLabel: string | null;
+  outdoorSensorLabel: string | null;
 };
 
 describe('Settings (e2e)', () => {
@@ -91,6 +93,8 @@ describe('Settings (e2e)', () => {
         climateAlertIndoorThresholdC: 24,
         climateAlertCooldownMinutes: 120,
         climateSummaryRetentionDays: 7,
+        indoorSensorLabel: null,
+        outdoorSensorLabel: null,
       });
     });
   });
@@ -120,7 +124,35 @@ describe('Settings (e2e)', () => {
         climateAlertIndoorThresholdC: 24,
         climateAlertCooldownMinutes: 120,
         climateSummaryRetentionDays: 7,
+        indoorSensorLabel: null,
+        outdoorSensorLabel: null,
       });
+    });
+
+    it('sets and clears a sensor label', async () => {
+      await request(app.getHttpServer())
+        .patch('/settings')
+        .set(authed())
+        .send({ indoorSensorLabel: 'Salon' })
+        .expect(200);
+
+      let res = await request(app.getHttpServer())
+        .get('/settings')
+        .set(authed())
+        .expect(200);
+      expect((res.body as SettingsBody).indoorSensorLabel).toBe('Salon');
+
+      await request(app.getHttpServer())
+        .patch('/settings')
+        .set(authed())
+        .send({ indoorSensorLabel: '' })
+        .expect(200);
+
+      res = await request(app.getHttpServer())
+        .get('/settings')
+        .set(authed())
+        .expect(200);
+      expect((res.body as SettingsBody).indoorSensorLabel).toBeNull();
     });
 
     it('rejects a non-positive numeric field', async () => {

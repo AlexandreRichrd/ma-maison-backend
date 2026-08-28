@@ -78,4 +78,82 @@ describe('HouseholdsService', () => {
     expect(result.users).toHaveLength(1);
     expect(result.users[0].id).toBe(userA.id);
   });
+
+  describe('updateMemberOrder', () => {
+    it('rejects an unknown caller', async () => {
+      await expect(
+        households.updateMemberOrder('00000000-0000-0000-0000-000000000000', {
+          memberOrder: [],
+        }),
+      ).rejects.toThrow(ApiError);
+    });
+
+    it('accepts a reordering that is a permutation of the current members', async () => {
+      const household = await prisma.household.create({
+        data: { memberOrder: [] },
+      });
+      const mia = await seedUser(household.id, 'mia@example.com');
+      const sam = await seedUser(household.id, 'sam@example.com');
+      await prisma.household.update({
+        where: { id: household.id },
+        data: { memberOrder: [mia.id, sam.id] },
+      });
+
+      const result = await households.updateMemberOrder(mia.id, {
+        memberOrder: [sam.id, mia.id],
+      });
+
+      expect(result.memberOrder).toEqual([sam.id, mia.id]);
+    });
+
+    it('rejects a reordering missing a current member', async () => {
+      const household = await prisma.household.create({
+        data: { memberOrder: [] },
+      });
+      const mia = await seedUser(household.id, 'mia@example.com');
+      await seedUser(household.id, 'sam@example.com');
+
+      await expect(
+        households.updateMemberOrder(mia.id, { memberOrder: [mia.id] }),
+      ).rejects.toThrow(ApiError);
+    });
+
+    it('rejects a reordering with an id from another household', async () => {
+      const household = await prisma.household.create({
+        data: { memberOrder: [] },
+      });
+      const otherHousehold = await prisma.household.create({
+        data: { memberOrder: [] },
+      });
+      const mia = await seedUser(household.id, 'mia@example.com');
+      const sam = await seedUser(household.id, 'sam@example.com');
+      const outsider = await seedUser(
+        otherHousehold.id,
+        'outsider@example.com',
+      );
+
+      await expect(
+        households.updateMemberOrder(mia.id, {
+          memberOrder: [sam.id, outsider.id],
+        }),
+      ).rejects.toThrow(ApiError);
+    });
+
+    it('rejects a duplicate id', async () => {
+      const household = await prisma.household.create({
+        data: { memberOrder: [] },
+      });
+      const mia = await seedUser(household.id, 'mia@example.com');
+      // A second member so mia.id repeated twice is the same length as
+      // the real member set — the length check alone wouldn't catch this,
+      // only the dedup check would.
+      await seedUser(household.id, 'sam@example.com');
+
+      await expect(
+        households.updateMemberOrder(mia.id, {
+          memberOrder: [mia.id, mia.id],
+        }),
+      ).rejects.toThrow(ApiError);
+    });
+  });
 });
