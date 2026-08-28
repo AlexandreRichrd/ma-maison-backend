@@ -95,6 +95,13 @@ src/
   settings/
     settings.controller.ts  # GET/PATCH /settings — household_settings, see Climate alerts
     settings.service.ts       # getEffective()/update(), fresh-read (no cache), see Climate alerts
+  alexa/
+    alexa.controller.ts       # POST /alexa — inbound skill endpoint, see Alexa
+    alexa.service.ts            # LaunchRequest/IntentRequest routing, French responses
+    alexa-signature.guard.ts    # Amazon request-signature verification, not user JWT — see Alexa
+    alexa-verifier.util.ts      # dynamic-import wrapper around the alexa-verifier package
+    current-conditions.ts       # pure French speech builder from ClimateService readings
+    alexa-response.util.ts      # pure Alexa response-envelope builder
   common/
     dto/                    # shared DTOs (pagination, etc.) if any emerge
     filters/                # exception filters -> consistent error shape
@@ -534,6 +541,65 @@ opening or closing windows — driven by `ClimateService.ingest()`'s existing
   decision) — `household_settings.updated_at` is the only history kept,
   last-write-wins. Fine for a two-person household; revisit only if a real
   need shows up.
+
+## Alexa
+
+`AlexaModule` (issue #13) is a single public endpoint, `POST /alexa`, that a
+custom Alexa skill calls so the household's shared Echo can answer "what's
+the temperature?" in French — the inbound half of the Alexa design decided
+in #10. Issue #14 (proactive push notifications) and #15 (a settings-page
+toggle) build on top of this and aren't done yet.
+
+- **Not user JWT auth, and not `DeviceAuthGuard`'s static bearer token
+  either.** Amazon signs every request instead, so `AlexaSignatureGuard`
+  verifies `SignatureCertChainUrl`/`Signature` against the raw request body
+  (cert-chain fetch/validate against Amazon's root CA + RSA-SHA256 signature
+  + a 150-second timestamp tolerance) via the `alexa-verifier` npm package —
+  a small, focused package doing exactly this, chosen over hand-rolling
+  X.509 chain validation (meaningfully more security-sensitive code to get
+  subtly wrong) or pulling in the full `ask-sdk-core`/`ask-sdk-express-adapter`
+  framework (a whole request-routing/response-builder layer this endpoint
+  doesn't need). It's ESM-only, loaded via a dynamic `import()` in
+  `alexa-verifier.util.ts` — kept in its own file so
+  `alexa-signature.guard.spec.ts` can `jest.mock` it instead of mocking a
+  dynamic import directly. As defense-in-depth beyond Amazon's signature,
+  the guard also checks the request's `applicationId` against
+  `ALEXA_SKILL_ID`, the same "throw 500 if the required env var is missing"
+  pattern as `DeviceAuthGuard`.
+- **`rawBody` is enabled globally** (`NestFactory.create(AppModule, { rawBody: true })`
+  in `main.ts`) because the signature must be verified against the *exact*
+  bytes Amazon sent, not a re-serialization of the parsed JSON. This is a
+  global flag, but its only effect is making `request.rawBody` available
+  alongside the normal parsed `request.body` — every other route is
+  unaffected, since nothing else reads it.
+- **French text is a deliberate, scoped exception** to the "no display copy
+  in this codebase" rule (see API surface) — Alexa speaks `current-conditions.ts`'s
+  output directly, with no frontend intermediary to localize it. Every other
+  route in this API still returns machine-readable codes only.
+- `AlexaService.handleRequest()` answers `LaunchRequest` and the
+  `GetCurrentConditionsIntent` (custom intent, so the skill can be re-asked
+  without reopening) with the same live reading `ClimateService.getCurrent()`
+  gives the dashboard widget — `current-conditions.ts` is a pure function,
+  unit-tested the same way as `climate-alert-trigger.ts`, and never throws:
+  a missing reading gets a graceful French fallback sentence instead of a
+  500, since Alexa times out around 8 seconds. `INDOOR_DEVICE`/`OUTDOOR_DEVICE`
+  live in `src/climate/device-names.ts`, shared with
+  `ClimateAlertTriggerService` rather than duplicated. `AMAZON.StopIntent`/
+  `CancelIntent`/`HelpIntent`/`FallbackIntent` and `SessionEndedRequest` are
+  also handled — the last of these never gets a spoken response, per the
+  Alexa spec.
+- **`SKILL_PROACTIVE_SUBSCRIPTION_CHANGED` handling is deferred**, per
+  issue #13's own open-question leaning — it's only useful for detecting
+  that notifications were turned off in the Alexa app, not required for the
+  core read-back flow, and isn't built until a real need shows up.
+- `skill.json` and the fr-FR interaction model live under
+  `my-home-backend/alexa/` (not `src/`, not built or deployed) — a
+  version-controlled reference, pasted manually into the Alexa developer
+  console (no ASK CLI pipeline, no Lambda, no separate AWS account, per
+  #10/#13's design: a development-stage skill on the household's own
+  Amazon account is sufficient indefinitely). The endpoint URI in
+  `skill.json` is a `<DOMAIN>` placeholder filled in when actually
+  configuring the skill.
 
 ## Database
 

@@ -13,12 +13,8 @@ import {
   evaluateClimateAlert,
 } from './climate-alert-trigger';
 import { ClimateAlertEvent } from './events/climate-alert.event';
+import { INDOOR_DEVICE, OUTDOOR_DEVICE } from './device-names';
 import type { MeasuresIngestedEvent } from './events/measures-ingested.event';
-
-// Matching capteur-salon.yaml / capteur-exterieur.yaml's device names — see
-// CLAUDE.md's Climate section.
-const INDOOR_DEVICE = 'capteur-salon';
-const OUTDOOR_DEVICE = 'capteur-exterieur';
 
 // The outdoor sensor isn't mounted in a Stevenson screen yet, so a reading
 // in direct sun can spike several degrees within minutes (see CLAUDE.md's

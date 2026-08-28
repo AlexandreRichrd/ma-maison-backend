@@ -1,0 +1,39 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "eurse",
+      "intents": [
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        },
+        {
+          "name": "GetCurrentConditionsIntent",
+          "slots": [],
+          "samples": [
+            "quelles sont les conditions",
+            "quelles sont les conditions actuelles",
+            "quelle température fait-il",
+            "quel temps fait-il",
+            "donne-moi la météo",
+            "donne-moi la température",
+            "quelle est la température à la maison"
+          ]
+        }
+      ],
+      "types": []
+    }
+  }
+}
