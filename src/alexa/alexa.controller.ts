@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 
 import { Public } from '../auth/public.decorator';
 import { AlexaSignatureGuard } from './alexa-signature.guard';
@@ -19,9 +19,17 @@ export class AlexaController {
   // would) — deliberate here, since Amazon's envelope is large and this
   // service only reads a few fields defensively; a validation 400 would
   // just look like a broken skill to Amazon, not a helpful error to a user.
+  // @HttpCode(200): Nest's default for @Post() is 201 Created, but Alexa
+  // requires a 200 response — anything else is treated as an invalid
+  // response, even when the body is otherwise well-formed. Separate from
+  // AlexaSignatureGuard's request-side signature check (see its own
+  // history in CLAUDE.md's Alexa section): that guard runs before this
+  // handler and rejects the *request*; this fixes what Amazon sees on the
+  // *response* once a request has already been accepted.
   @Public()
   @UseGuards(AlexaSignatureGuard)
   @Post()
+  @HttpCode(200)
   handleRequest(@Body() envelope: RequestEnvelope): Promise<ResponseEnvelope> {
     return this.alexa.handleRequest(envelope);
   }
