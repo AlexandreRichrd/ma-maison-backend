@@ -3,6 +3,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import cookieParser from 'cookie-parser';
+import { AlexaModule } from './alexa/alexa.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
@@ -34,6 +35,7 @@ import { throttlerConfig } from './throttler.config';
     RemindersModule,
     SettingsModule,
     ClimateModule,
+    AlexaModule,
   ],
   controllers: [AppController],
   providers: [AppService],
