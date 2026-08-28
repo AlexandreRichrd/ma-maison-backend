@@ -1,0 +1,30 @@
+{
+  "manifest": {
+    "publishingInformation": {
+      "locales": {
+        "fr-FR": {
+          "name": "Hearth",
+          "summary": "Relevé de température et d'humidité de la maison.",
+          "description": "Skill privée pour un seul foyer : donne la température et l'humidité intérieure/extérieure actuelles. Non publiée, non certifiée — usage développement uniquement.",
+          "examplePhrases": [
+            "Alexa, ouvre eurse",
+            "Alexa, demande à eurse quelles sont les conditions"
+          ]
+        }
+      },
+      "isAvailableWorldwide": false,
+      "testingInstructions": "Skill de développement pour un usage personnel, à usage exclusif du compte Amazon du foyer. Pas de certification ni de publication prévue.",
+      "category": "SMART_HOME",
+      "distributionCountries": []
+    },
+    "apis": {
+      "custom": {
+        "endpoint": {
+          "uri": "https://<DOMAIN>/api/alexa"
+        },
+        "interfaces": []
+      }
+    },
+    "manifestVersion": "1.0"
+  }
+}
