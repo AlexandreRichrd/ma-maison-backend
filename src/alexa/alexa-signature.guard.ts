@@ -43,6 +43,9 @@ export class AlexaSignatureGuard implements CanActivate {
       typeof signature !== 'string' ||
       !rawBody
     ) {
+      this.logger.warn(
+        `alexa signature rejected: missing header(s) or raw body — ${this.diagnostics(request)}`,
+      );
       throw new ApiError(401, 'authorization', 'invalid_alexa_signature');
     }
 
@@ -53,7 +56,9 @@ export class AlexaSignatureGuard implements CanActivate {
         rawBody.toString('utf8'),
       );
     } catch (error) {
-      this.logger.warn(`alexa signature rejected: ${String(error)}`);
+      this.logger.warn(
+        `alexa signature rejected: ${String(error)} — ${this.diagnostics(request)}`,
+      );
       throw new ApiError(401, 'authorization', 'invalid_alexa_signature');
     }
 
@@ -67,5 +72,26 @@ export class AlexaSignatureGuard implements CanActivate {
     }
 
     return true;
+  }
+
+  // Deliberately never includes header/body *values* — a signature or
+  // certificate chain is exactly the kind of thing that shouldn't end up in
+  // logs. Presence, length, and type are enough to distinguish "the request
+  // never reached us intact" (missing header, missing/short rawBody) from
+  // "the request arrived fine but didn't cryptographically verify" (a
+  // one-line "invalid signature" collapses those into one unfalsifiable
+  // symptom — see CLAUDE.md's Alexa section for the incident this came
+  // from). Kept permanently, not scaffolding.
+  private diagnostics(request: RawBodyRequest<Request>): string {
+    const rawBody = request.rawBody;
+    return JSON.stringify({
+      hasSignatureCertChainUrlHeader:
+        typeof request.headers['signaturecertchainurl'] === 'string',
+      hasSignatureHeader: typeof request.headers['signature'] === 'string',
+      contentLengthHeader: request.headers['content-length'] ?? null,
+      rawBodyDefined: rawBody !== undefined,
+      rawBodyLength: rawBody?.length ?? null,
+      rawBodyType: rawBody?.constructor?.name ?? null,
+    });
   }
 }
