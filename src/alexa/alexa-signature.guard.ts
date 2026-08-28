@@ -20,6 +20,16 @@ import type { RequestEnvelope } from './types/alexa.types';
  * ask-sdk) against the *raw* request bytes, plus checks the request is
  * addressed to this specific skill (ALEXA_SKILL_ID) as defense-in-depth on
  * top of Amazon's own signature.
+ *
+ * Reads the `Signature-256` header, not the legacy `Signature` header —
+ * `alexa-verifier` verifies with RSA-SHA256, and `Signature-256` is the
+ * SHA-256-signed value that pairs with it. `Signature` is SHA-1-signed;
+ * feeding it to an RSA-SHA256 verifier fails cryptographically on every
+ * request, every time — a real incident this guard's logging (see
+ * `diagnostics()`) narrowed down, since it produces the exact same generic
+ * "invalid signature" alexa-verifier returns for it as for an actual
+ * corrupted body, with none of the other checks (cert chain, timestamp)
+ * affected either way.
  */
 @Injectable()
 export class AlexaSignatureGuard implements CanActivate {
@@ -35,7 +45,7 @@ export class AlexaSignatureGuard implements CanActivate {
       .switchToHttp()
       .getRequest<RawBodyRequest<Request>>();
     const certChainUrl = request.headers['signaturecertchainurl'];
-    const signature = request.headers['signature'];
+    const signature = request.headers['signature-256'];
     const rawBody = request.rawBody;
 
     if (
@@ -43,6 +53,9 @@ export class AlexaSignatureGuard implements CanActivate {
       typeof signature !== 'string' ||
       !rawBody
     ) {
+      this.logger.warn(
+        `alexa signature rejected: missing header(s) or raw body — ${this.diagnostics(request)}`,
+      );
       throw new ApiError(401, 'authorization', 'invalid_alexa_signature');
     }
 
@@ -53,7 +66,9 @@ export class AlexaSignatureGuard implements CanActivate {
         rawBody.toString('utf8'),
       );
     } catch (error) {
-      this.logger.warn(`alexa signature rejected: ${String(error)}`);
+      this.logger.warn(
+        `alexa signature rejected: ${String(error)} — ${this.diagnostics(request)}`,
+      );
       throw new ApiError(401, 'authorization', 'invalid_alexa_signature');
     }
 
@@ -67,5 +82,27 @@ export class AlexaSignatureGuard implements CanActivate {
     }
 
     return true;
+  }
+
+  // Deliberately never includes header/body *values* — a signature or
+  // certificate chain is exactly the kind of thing that shouldn't end up in
+  // logs. Presence, length, and type are enough to distinguish "the request
+  // never reached us intact" (missing header, missing/short rawBody) from
+  // "the request arrived fine but didn't cryptographically verify" (a
+  // one-line "invalid signature" collapses those into one unfalsifiable
+  // symptom — see CLAUDE.md's Alexa section for the incident this came
+  // from). Kept permanently, not scaffolding.
+  private diagnostics(request: RawBodyRequest<Request>): string {
+    const rawBody = request.rawBody;
+    return JSON.stringify({
+      hasSignatureCertChainUrlHeader:
+        typeof request.headers['signaturecertchainurl'] === 'string',
+      hasSignature256Header:
+        typeof request.headers['signature-256'] === 'string',
+      contentLengthHeader: request.headers['content-length'] ?? null,
+      rawBodyDefined: rawBody !== undefined,
+      rawBodyLength: rawBody?.length ?? null,
+      rawBodyType: rawBody?.constructor?.name ?? null,
+    });
   }
 }

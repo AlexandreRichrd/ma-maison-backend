@@ -31,7 +31,11 @@ function requestWith(overrides: Partial<Request> & { rawBody?: Buffer } = {}) {
   return {
     headers: {
       signaturecertchainurl: 'https://s3.amazonaws.com/echo.api/cert.pem',
-      signature: 'c2lnbmF0dXJl',
+      // Amazon's current spec (see CLAUDE.md's Alexa section): Signature-256
+      // is the SHA-256-signed value alexa-verifier's RSA-SHA256 check
+      // expects. The legacy Signature header (SHA-1) is a real, previously
+      // shipped bug here — see the dedicated regression test below.
+      'signature-256': 'c2lnbmF0dXJl',
     },
     rawBody: Buffer.from(JSON.stringify(VALID_BODY)),
     body: VALID_BODY,
@@ -66,6 +70,28 @@ describe('AlexaSignatureGuard', () => {
     await expect(
       guard.canActivate(contextFor(requestWith({ headers: {} }))),
     ).rejects.toThrow(ApiError);
+  });
+
+  // Regression test: a real deployed build read the legacy SHA-1
+  // `Signature` header and fed it to alexa-verifier's RSA-SHA256 check —
+  // every genuine Amazon-signed request failed identically ("invalid
+  // signature"), since that pairing can never verify cryptographically
+  // regardless of a mocked verifier. A mock can't reproduce the crypto
+  // failure itself, but it CAN pin the header-name contract: this fails if
+  // the guard ever reads back `signature` instead of `signature-256`.
+  it('never reads the legacy Signature header, only Signature-256', async () => {
+    mockVerify.mockResolvedValue(undefined);
+    const legacyOnly = contextFor(
+      requestWith({
+        headers: {
+          signaturecertchainurl: 'https://s3.amazonaws.com/echo.api/cert.pem',
+          signature: 'legacy-sha1-value',
+        } as unknown as Request['headers'],
+      }),
+    );
+
+    await expect(guard.canActivate(legacyOnly)).rejects.toThrow(ApiError);
+    expect(mockVerify).not.toHaveBeenCalled();
   });
 
   it('rejects a request with no raw body', async () => {
