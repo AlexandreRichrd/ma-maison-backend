@@ -58,7 +58,7 @@ describe('Alexa inbound endpoint (e2e)', () => {
     const res = await request(app.getHttpServer())
       .post('/alexa')
       .send({ request: { type: 'LaunchRequest' } })
-      .expect(201);
+      .expect(200);
     const body = res.body as ResponseEnvelope;
 
     expect(body.response.outputSpeech?.text).toContain('21,3');
@@ -72,7 +72,7 @@ describe('Alexa inbound endpoint (e2e)', () => {
       .send({
         request: { type: 'IntentRequest', intent: { name: 'SomeOtherIntent' } },
       })
-      .expect(201);
+      .expect(200);
     const body = res.body as ResponseEnvelope;
 
     expect(body.response.outputSpeech?.text).toContain('pas compris');
@@ -83,7 +83,7 @@ describe('Alexa inbound endpoint (e2e)', () => {
     const res = await request(app.getHttpServer())
       .post('/alexa')
       .send({ request: { type: 'SessionEndedRequest' } })
-      .expect(201);
+      .expect(200);
 
     expect(res.body as ResponseEnvelope).toEqual({
       version: '1.0',
