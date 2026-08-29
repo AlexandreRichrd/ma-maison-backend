@@ -60,6 +60,7 @@ export class AlexaProactiveEventListener {
     try {
       const accessToken = await this.lwaToken.getAccessToken();
       await this.sendProactiveEvent(accessToken, event);
+      this.logger.log(`sent Alexa proactive event (${event.direction})`);
     } catch (error) {
       this.logger.error('failed to send Alexa proactive event', error);
     }

@@ -750,6 +750,24 @@ whether this channel succeeds, same requirement that already shapes
 - No new HTTP client dependency for any of this — Node 20's global `fetch`
   is enough, avoiding another dependency-approval round like
   `alexa-verifier`'s.
+- **Triggering a send on demand, for testing**: waiting for real climate
+  conditions to satisfy the cool-down/close-up trigger makes live testing
+  impractical, but this never gets an HTTP route of its own — this API
+  already has one public unauthenticated endpoint for Alexa
+  (`AlexaController`), and a second trigger surface that exists purely for
+  testing convenience isn't worth the risk. Instead:
+  `npm run alexa:trigger-proactive-event -- cool_down` (or `close_up`),
+  same `NestFactory.createApplicationContext()` + one-off `AlexaTriggerModule`
+  pattern as `climate:backfill-summary`/`ClimateBackfillModule` — resolves
+  the real `AlexaProactiveEventListener` from a minimal Nest context and
+  calls its real `handleClimateAlert()` directly with a synthetic
+  `ClimateAlertEvent`, so it exercises the actual LWA token fetch and the
+  actual proactive-event POST, not a reimplementation of either. On the
+  VPS: `docker compose exec api npm run alexa:trigger-proactive-event -- cool_down`.
+  Failures are caught and logged by the listener itself, exactly as a real
+  climate-triggered send would be — the script can't tell you whether the
+  send succeeded beyond that log line, by design (it's exercising the real
+  method, which itself never reports success/failure to its caller).
 
 ## Database
 
