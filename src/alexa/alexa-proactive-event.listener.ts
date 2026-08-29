@@ -8,11 +8,20 @@ const PROACTIVE_EVENTS_URL =
   'https://api.eu.amazonalexa.com/v1/proactiveEvents/stages/development';
 
 // "Open the windows now" is worthless an hour later — see the issue's own
-// framing. Short enough that a stale notification doesn't sit in the
-// queue, long enough that someone glancing at the Echo a few minutes later
-// still sees it.
+// framing. Amazon's Proactive Events API reference caps expiryTime to
+// 5 minutes-24 hours from timestamp (a 400 outside that range); 10 minutes
+// is comfortably inside that floor while still short enough that a stale
+// alert doesn't sit in the queue.
 const EXPIRY_MS = 10 * 60_000;
 
+// Also declared in localizedAttributes below (required on every proactive
+// event request regardless of event type, even though
+// AMAZON.MessageAlert.Activated's own payload has no locale-specific
+// strings — see CLAUDE.md's Alexa section). NOT the same as a guarantee
+// that Amazon actually has an AMAZON.MessageAlert.Activated notification
+// template in French: that isn't documented one way or the other, and
+// this codebase has no way to confirm it short of a live device test —
+// see CLAUDE.md's Alexa section for that open risk.
 const SKILL_LOCALE = 'fr-FR';
 
 type ProactiveEventRequest = {
@@ -62,9 +71,7 @@ export class AlexaProactiveEventListener {
   ): Promise<void> {
     const body: ProactiveEventRequest = {
       timestamp: event.firedAt.toISOString(),
-      // Stable across a retry of this same firing (not wall-clock time
-      // observed here) — see ClimateAlertEvent.firedAt's own comment.
-      referenceId: `climate-alert-${event.direction}-${event.firedAt.toISOString()}`,
+      referenceId: buildReferenceId(event),
       expiryTime: new Date(event.firedAt.getTime() + EXPIRY_MS).toISOString(),
       event: {
         name: 'AMAZON.MessageAlert.Activated',
@@ -93,4 +100,18 @@ export class AlexaProactiveEventListener {
       );
     }
   }
+}
+
+// referenceId must be alphanumeric-plus-tilde only, per Amazon's Proactive
+// Events API reference — a hyphen, colon, period, or underscore anywhere in
+// it (all present in the direction string and an ISO timestamp) makes
+// every request a 400. Stripping down to [A-Za-z0-9~] keeps the same
+// stability/uniqueness properties (pure function of direction + firedAt:
+// same firing -> same id, different firing -> different id) without
+// relying on any particular separator surviving.
+function buildReferenceId(event: ClimateAlertEvent): string {
+  return `climateAlert${event.direction}${event.firedAt.toISOString()}`.replace(
+    /[^A-Za-z0-9~]/g,
+    '',
+  );
 }

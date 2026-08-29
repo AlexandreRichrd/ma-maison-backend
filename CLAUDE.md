@@ -713,10 +713,40 @@ whether this channel succeeds, same requirement that already shapes
   (`ClimateAlertEvent`'s new field, see Channel-agnostic by design above),
   not from wall-clock time observed by the listener — stable across a retry
   of the *same* emitted event, so Amazon treats a retried send as an update
-  to the same proactive event instance rather than a duplicate.
-- **`expiryTime`** is 10 minutes after `firedAt` — long enough to notice
-  the yellow ring, short enough that a stale "open the windows now" alert
-  doesn't sit in the queue, per the issue's own framing.
+  to the same proactive event instance rather than a duplicate (per
+  Amazon's reference: reusing a `referenceId` with a new `timestamp`
+  replaces the earlier instance; it's per-skill-and-customer, not globally
+  unique). **Must be alphanumeric characters and `~` only** — a real bug
+  caught by re-reading the reference doc rather than trusting the original
+  implementation: the first version joined `direction` and an ISO
+  timestamp with hyphens (`climate-alert-cool_down-2026-…`), which put `-`,
+  `:`, and `.` into the field. Every unit test still passed, since they
+  mock the HTTP call and never checked the character set — this would have
+  been a 400 on every single real send. `buildReferenceId()` in
+  `alexa-proactive-event.listener.ts` now strips to `[A-Za-z0-9~]` after
+  concatenating, which keeps the same stability/uniqueness properties
+  without depending on a separator surviving.
+- **`expiryTime`** is 10 minutes after `firedAt`. Amazon's Proactive Events
+  API reference caps this to **5 minutes–24 hours** from `timestamp` (a 400
+  outside that range) — 10 minutes is comfortably inside that floor, long
+  enough to notice the yellow ring, short enough that a stale "open the
+  windows now" alert doesn't sit in the queue overnight, per the issue's
+  own framing.
+- **Open risk, not resolved**: whether Amazon actually has a French
+  rendering of the `AMAZON.MessageAlert.Activated` notification template
+  is **not confirmed**. `localizedAttributes: [{ locale: 'fr-FR' }]` is
+  correctly shaped per the docs (a required top-level field on every
+  proactive event request, regardless of event type — this event's own
+  payload has no locale-specific strings of its own to localize), but
+  Amazon's documentation doesn't state which locales each proactive event
+  *type* has a rendering for, and this could not be confirmed by reading
+  further docs. If `fr-FR` turns out unsupported for this event type, the
+  most likely failure mode is the API still accepting the request (locale
+  support is a rendering-side concern, not necessarily a request
+  validation one) while the household's Echo never actually announces
+  anything — the ring may still go yellow (a device-level indicator) even
+  if the spoken/notification text doesn't render. Only a live device test
+  can settle this; do not assume either outcome.
 - No new HTTP client dependency for any of this — Node 20's global `fetch`
   is enough, avoiding another dependency-approval round like
   `alexa-verifier`'s.

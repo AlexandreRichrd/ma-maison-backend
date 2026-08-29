@@ -45,7 +45,7 @@ describe('AlexaProactiveEventListener', () => {
     const body = JSON.parse(options.body as string) as Record<string, unknown>;
     expect(body).toEqual({
       timestamp: '2026-08-29T10:00:00.000Z',
-      referenceId: 'climate-alert-cool_down-2026-08-29T10:00:00.000Z',
+      referenceId: 'climateAlertcooldown20260829T100000000Z',
       expiryTime: '2026-08-29T10:10:00.000Z',
       event: {
         name: 'AMAZON.MessageAlert.Activated',
@@ -57,6 +57,30 @@ describe('AlexaProactiveEventListener', () => {
       localizedAttributes: [{ locale: 'fr-FR' }],
       relevantAudience: { type: 'Multicast', payload: {} },
     });
+  });
+
+  // Regression test: referenceId originally included the raw direction
+  // string and an ISO timestamp joined with hyphens, which put `-`, `:`,
+  // and `.` into the field — Amazon's Proactive Events API reference
+  // restricts referenceId to alphanumeric characters and `~` only, so
+  // every real send would have been rejected with a 400 despite every
+  // other test here passing (they mock the verifier/fetch and never
+  // checked the character set).
+  it('builds a referenceId using only alphanumeric characters and ~', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      text: () => Promise.resolve(''),
+    });
+    global.fetch = fetchMock;
+
+    await listener.handleClimateAlert(event);
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const { referenceId } = JSON.parse(options.body as string) as {
+      referenceId: string;
+    };
+    expect(referenceId).toMatch(/^[A-Za-z0-9~]+$/);
   });
 
   it('produces a stable referenceId for the same event, different for a different firedAt', async () => {
