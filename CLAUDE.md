@@ -617,12 +617,57 @@ done yet.
   core read-back flow, and isn't built until a real need shows up.
 - `skill.json` and the fr-FR interaction model live under
   `my-home-backend/alexa/` (not `src/`, not built or deployed) — a
-  version-controlled reference, pasted manually into the Alexa developer
-  console (no ASK CLI pipeline, no Lambda, no separate AWS account, per
-  #10/#13's design: a development-stage skill on the household's own
-  Amazon account is sufficient indefinitely). The endpoint URI in
-  `skill.json` is a `<DOMAIN>` placeholder filled in when actually
-  configuring the skill.
+  version-controlled reference. The endpoint URI in `skill.json` is a
+  `<DOMAIN>` placeholder filled in when actually configuring the skill.
+  **Correction to #13's "no ASK CLI pipeline" claim**: that holds for the
+  *interaction model* (`alexa/models/fr-FR.json`), still pasted manually
+  into the developer console — but not for the *manifest*
+  (`alexa/skill.json`). The proactive-events permission (see below) cannot
+  be granted from the console UI at all; it only exists in the manifest,
+  which must be pushed via SMAPI. No Lambda, no separate AWS account is
+  needed for this — a custom-HTTPS skill can use ASK CLI purely to manage
+  the manifest, never touching Lambda deployment.
+  - One-time setup: `npm install -g ask-cli`, then `ask configure`
+    (interactive; logs in with the household's Amazon developer account —
+    AWS credential linking, which that command also offers, isn't needed
+    since this skill has no Lambda function to deploy).
+  - Push the manifest to the existing skill
+    (`amzn1.ask.skill.11dd43e1-1632-4292-a360-51375b4c60d5`) after editing
+    `alexa/skill.json`:
+    ```
+    ask smapi update-skill-manifest \
+      -s amzn1.ask.skill.11dd43e1-1632-4292-a360-51375b4c60d5 \
+      -g development \
+      --manifest "file:alexa/skill.json"
+    ```
+    Run this manually, from `my-home-backend/`, after replacing
+    `skill.json`'s `<DOMAIN>` placeholder with the real deployed domain —
+    not part of any deploy script. Not run by this session; treat any
+    validation error it reports as authoritative over this doc.
+  - `skill.json`'s `manifest.permissions` declares
+    `alexa::devices:all:notifications:write` and `manifest.events.publications`
+    declares `AMAZON.MessageAlert.Activated` — required for #14's outbound
+    proactive events to be accepted at all; without them, every
+    `AlexaProactiveEventListener` POST is rejected regardless of how
+    correct the request body is. Deliberately **no** `events.subscriptions`
+    or `events.endpoint` entry: those exist for `SKILL_PROACTIVE_SUBSCRIPTION_CHANGED`,
+    which #13 already decided to defer (see above), so there's nothing at
+    `POST /alexa` that would meaningfully act on it yet — no reason to
+    declare a subscription before there's a real handler for it. Amazon's
+    own manifest schema docs don't clearly state whether `events.endpoint`
+    is required once `events` exists at all even with only `publications`
+    declared (undocumented as far as this session could confirm) — if the
+    ASK CLI push rejects the manifest for a missing `events.endpoint`, add
+    one pointing at the same URI as `apis.custom.endpoint` (same
+    `sslCertificateType`), not a new endpoint.
+  - While adding these, found `apis.custom.endpoint` was missing
+    `sslCertificateType: "Trusted"` — required on every HTTPS (non-Lambda)
+    endpoint declaration in the manifest schema, not specific to proactive
+    events. This was presumably tolerated so far because the skill was
+    likely configured through the console UI directly rather than by
+    pushing this file; now that this file is being pushed via SMAPI for
+    real, a missing required field could fail that push outright, so it's
+    fixed here rather than left as a landmine for the first real push.
 
 ### Outbound: proactive events (issue #14)
 
