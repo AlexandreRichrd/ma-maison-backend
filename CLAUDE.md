@@ -517,10 +517,14 @@ opening or closing windows — driven by `ClimateService.ingest()`'s existing
   constants here — this API never renders a label, so it has no reason to
   resolve device name to display name itself, only to store the override.
 - **Channel-agnostic by design**: the trigger service emits
-  `climate.alert.triggered` (`ClimateAlertEvent`: direction + readings);
-  `ClimateAlertMailListener` is the only listener today, sending through
-  `MailService`. Adding push/SMS later is another `@OnEvent` listener, no
-  change to the trigger service itself.
+  `climate.alert.triggered` (`ClimateAlertEvent`: direction + readings +
+  `firedAt`, the timestamp of this specific firing). `ClimateAlertMailListener`
+  (email, via `MailService`) and `AlexaProactiveEventListener` (issue #14,
+  see the Alexa section) are today's listeners — adding another channel
+  later is just another `@OnEvent` listener, no change to the trigger
+  service itself. `firedAt` was added for #14's idempotency `referenceId`
+  (see below) but is generic, not Alexa-specific — any listener needing a
+  stable per-firing identity can use it.
 - **In-memory state**, same reasoning as `ClimateGateway`'s
   `lastBroadcastAt` (single process, no scale problem to solve yet):
   resets on restart, so a crossing already in progress before a restart can
@@ -536,7 +540,11 @@ opening or closing windows — driven by `ClimateService.ingest()`'s existing
   tomorrow"), and none is planned unless a real need shows up (see Not in
   scope yet); no explicit time-window suppression (e.g. blackout at 3am) —
   the indoor-comfort gate already prevents pointless overnight/winter
-  firing in practice, per the issue's own reasoning.
+  firing in practice, per the issue's own reasoning. Issue #14 raised the
+  same question for the Alexa channel specifically and resolved it the same
+  way: no separate night-time suppression there either, same gate, same
+  reasoning — `AlexaProactiveEventListener` fires under exactly the
+  conditions email does, no time-window logic of its own.
 - **No audit trail on settings changes** (issue #11's storage-shape
   decision) — `household_settings.updated_at` is the only history kept,
   last-write-wins. Fine for a two-person household; revisit only if a real
@@ -544,11 +552,13 @@ opening or closing windows — driven by `ClimateService.ingest()`'s existing
 
 ## Alexa
 
-`AlexaModule` (issue #13) is a single public endpoint, `POST /alexa`, that a
-custom Alexa skill calls so the household's shared Echo can answer "what's
-the temperature?" in French — the inbound half of the Alexa design decided
-in #10. Issue #14 (proactive push notifications) and #15 (a settings-page
-toggle) build on top of this and aren't done yet.
+`AlexaModule` covers both halves of the Alexa design from #10: the inbound
+skill endpoint (#13, `POST /alexa`) that answers "what's the temperature?"
+in French when the household opens the shared Echo's skill, and the
+outbound channel (#14, `AlexaProactiveEventListener`) that lights up the
+Echo's notification ring when a climate alert fires. Issue #15 (a
+settings-page toggle for the Alexa channel) builds on top of this and isn't
+done yet.
 
 - **Not user JWT auth, and not `DeviceAuthGuard`'s static bearer token
   either.** Amazon signs every request instead, so `AlexaSignatureGuard`
@@ -596,18 +606,168 @@ toggle) build on top of this and aren't done yet.
   `CancelIntent`/`HelpIntent`/`FallbackIntent` and `SessionEndedRequest` are
   also handled — the last of these never gets a spoken response, per the
   Alexa spec.
+- **`@HttpCode(200)` on the controller, not Nest's default `201`** —
+  Amazon's skill service treats anything but `200` as an invalid response,
+  even a well-formed body. Found via a real developer-console simulator
+  retest, the same way `Signature-256` was: verifying against Amazon's
+  actual behavior, not assuming a framework default is fine.
 - **`SKILL_PROACTIVE_SUBSCRIPTION_CHANGED` handling is deferred**, per
   issue #13's own open-question leaning — it's only useful for detecting
   that notifications were turned off in the Alexa app, not required for the
   core read-back flow, and isn't built until a real need shows up.
 - `skill.json` and the fr-FR interaction model live under
   `my-home-backend/alexa/` (not `src/`, not built or deployed) — a
-  version-controlled reference, pasted manually into the Alexa developer
-  console (no ASK CLI pipeline, no Lambda, no separate AWS account, per
-  #10/#13's design: a development-stage skill on the household's own
-  Amazon account is sufficient indefinitely). The endpoint URI in
-  `skill.json` is a `<DOMAIN>` placeholder filled in when actually
-  configuring the skill.
+  version-controlled reference. The endpoint URI in `skill.json` is a
+  `<DOMAIN>` placeholder filled in when actually configuring the skill.
+  **Correction to #13's "no ASK CLI pipeline" claim**: that holds for the
+  *interaction model* (`alexa/models/fr-FR.json`), still pasted manually
+  into the developer console — but not for the *manifest*
+  (`alexa/skill.json`). The proactive-events permission (see below) cannot
+  be granted from the console UI at all; it only exists in the manifest,
+  which must be pushed via SMAPI. No Lambda, no separate AWS account is
+  needed for this — a custom-HTTPS skill can use ASK CLI purely to manage
+  the manifest, never touching Lambda deployment.
+  - One-time setup: `npm install -g ask-cli`, then `ask configure`
+    (interactive; logs in with the household's Amazon developer account —
+    AWS credential linking, which that command also offers, isn't needed
+    since this skill has no Lambda function to deploy).
+  - Push the manifest to the existing skill
+    (`amzn1.ask.skill.11dd43e1-1632-4292-a360-51375b4c60d5`) after editing
+    `alexa/skill.json`:
+    ```
+    ask smapi update-skill-manifest \
+      -s amzn1.ask.skill.11dd43e1-1632-4292-a360-51375b4c60d5 \
+      -g development \
+      --manifest "file:alexa/skill.json"
+    ```
+    Run this manually, from `my-home-backend/`, after replacing
+    `skill.json`'s `<DOMAIN>` placeholder with the real deployed domain —
+    not part of any deploy script. Not run by this session; treat any
+    validation error it reports as authoritative over this doc.
+  - `skill.json`'s `manifest.permissions` declares
+    `alexa::devices:all:notifications:write` and `manifest.events.publications`
+    declares `AMAZON.MessageAlert.Activated` — required for #14's outbound
+    proactive events to be accepted at all; without them, every
+    `AlexaProactiveEventListener` POST is rejected regardless of how
+    correct the request body is. Deliberately **no** `events.subscriptions`
+    or `events.endpoint` entry: those exist for `SKILL_PROACTIVE_SUBSCRIPTION_CHANGED`,
+    which #13 already decided to defer (see above), so there's nothing at
+    `POST /alexa` that would meaningfully act on it yet — no reason to
+    declare a subscription before there's a real handler for it. Amazon's
+    own manifest schema docs don't clearly state whether `events.endpoint`
+    is required once `events` exists at all even with only `publications`
+    declared (undocumented as far as this session could confirm) — if the
+    ASK CLI push rejects the manifest for a missing `events.endpoint`, add
+    one pointing at the same URI as `apis.custom.endpoint` (same
+    `sslCertificateType`), not a new endpoint.
+  - While adding these, found `apis.custom.endpoint` was missing
+    `sslCertificateType: "Trusted"` — required on every HTTPS (non-Lambda)
+    endpoint declaration in the manifest schema, not specific to proactive
+    events. This was presumably tolerated so far because the skill was
+    likely configured through the console UI directly rather than by
+    pushing this file; now that this file is being pushed via SMAPI for
+    real, a missing required field could fail that push outright, so it's
+    fixed here rather than left as a landmine for the first real push.
+
+### Outbound: proactive events (issue #14)
+
+`AlexaProactiveEventListener` is the Alexa channel for
+`climate.alert.triggered`, alongside `ClimateAlertMailListener` (see
+Climate alerts) — sends a silent `BROADCAST` proactive event so the shared
+Echo's ring goes yellow. It never sends the actual reading; that's read
+back on-demand by the inbound endpoint above. Failure here (token or POST)
+is caught and logged, never rethrown — email must go out regardless of
+whether this channel succeeds, same requirement that already shapes
+`ClimateAlertMailListener`'s own per-recipient `.catch()`.
+
+- **`AlexaLwaTokenService`** obtains an LWA (Login with Amazon) access
+  token via the `client_credentials` grant, scoped to
+  `alexa::proactive_events`: `POST https://api.amazon.com/auth/o2/token`
+  (a single global endpoint, not region-specific — unlike the user-facing
+  authorization-code grant), `application/x-www-form-urlencoded`, body
+  `grant_type=client_credentials&client_id=…&client_secret=…&scope=alexa::proactive_events`,
+  response `{ access_token, token_type, expires_in, scope }`. Caches the
+  token in memory (same in-memory-state reasoning as `ClimateGateway`/
+  `ClimateAlertTriggerService`) and refreshes it a minute before actual
+  expiry, not on-the-dot. `ALEXA_LWA_CLIENT_ID`/`ALEXA_LWA_CLIENT_SECRET`
+  are the skill's OAuth client credentials for this — distinct from
+  `ALEXA_SKILL_ID` above, which is the application id checked on *inbound*
+  requests; both come from the same developer console but are different
+  values (client credentials are on the skill's Permissions tab, after
+  enabling "Send Alexa Events" there).
+- **The proactive event itself**: `POST
+  https://api.eu.amazonalexa.com/v1/proactiveEvents/stages/development`
+  (development-stage, deliberately permanent per #10/#14's design note: a
+  skill enabled only on the household's own Amazon account never needs
+  certification to reach production, so there's no reason to ever move off
+  `stages/development`), `Authorization: Bearer <token>`, an
+  `AMAZON.MessageAlert.Activated` event (`state: { status: 'UNREAD',
+  freshness: 'NEW' }`, `messageGroup: { creator: { name: 'Hearth' }, count:
+  1 }`), `relevantAudience: { type: 'Multicast', payload: {} }` (this is
+  the actual field name for what the issue calls `BROADCAST` — reaches
+  every device with notifications enabled for the skill, no per-user
+  targeting), and a required top-level `localizedAttributes: [{ locale:
+  'fr-FR' }]` even though this event type has no locale-specific strings of
+  its own.
+- **`referenceId`** is derived from `event.direction` + `event.firedAt`
+  (`ClimateAlertEvent`'s new field, see Channel-agnostic by design above),
+  not from wall-clock time observed by the listener — stable across a retry
+  of the *same* emitted event, so Amazon treats a retried send as an update
+  to the same proactive event instance rather than a duplicate (per
+  Amazon's reference: reusing a `referenceId` with a new `timestamp`
+  replaces the earlier instance; it's per-skill-and-customer, not globally
+  unique). **Must be alphanumeric characters and `~` only** — a real bug
+  caught by re-reading the reference doc rather than trusting the original
+  implementation: the first version joined `direction` and an ISO
+  timestamp with hyphens (`climate-alert-cool_down-2026-…`), which put `-`,
+  `:`, and `.` into the field. Every unit test still passed, since they
+  mock the HTTP call and never checked the character set — this would have
+  been a 400 on every single real send. `buildReferenceId()` in
+  `alexa-proactive-event.listener.ts` now strips to `[A-Za-z0-9~]` after
+  concatenating, which keeps the same stability/uniqueness properties
+  without depending on a separator surviving.
+- **`expiryTime`** is 10 minutes after `firedAt`. Amazon's Proactive Events
+  API reference caps this to **5 minutes–24 hours** from `timestamp` (a 400
+  outside that range) — 10 minutes is comfortably inside that floor, long
+  enough to notice the yellow ring, short enough that a stale "open the
+  windows now" alert doesn't sit in the queue overnight, per the issue's
+  own framing.
+- **Open risk, not resolved**: whether Amazon actually has a French
+  rendering of the `AMAZON.MessageAlert.Activated` notification template
+  is **not confirmed**. `localizedAttributes: [{ locale: 'fr-FR' }]` is
+  correctly shaped per the docs (a required top-level field on every
+  proactive event request, regardless of event type — this event's own
+  payload has no locale-specific strings of its own to localize), but
+  Amazon's documentation doesn't state which locales each proactive event
+  *type* has a rendering for, and this could not be confirmed by reading
+  further docs. If `fr-FR` turns out unsupported for this event type, the
+  most likely failure mode is the API still accepting the request (locale
+  support is a rendering-side concern, not necessarily a request
+  validation one) while the household's Echo never actually announces
+  anything — the ring may still go yellow (a device-level indicator) even
+  if the spoken/notification text doesn't render. Only a live device test
+  can settle this; do not assume either outcome.
+- No new HTTP client dependency for any of this — Node 20's global `fetch`
+  is enough, avoiding another dependency-approval round like
+  `alexa-verifier`'s.
+- **Triggering a send on demand, for testing**: waiting for real climate
+  conditions to satisfy the cool-down/close-up trigger makes live testing
+  impractical, but this never gets an HTTP route of its own — this API
+  already has one public unauthenticated endpoint for Alexa
+  (`AlexaController`), and a second trigger surface that exists purely for
+  testing convenience isn't worth the risk. Instead:
+  `npm run alexa:trigger-proactive-event -- cool_down` (or `close_up`),
+  same `NestFactory.createApplicationContext()` + one-off `AlexaTriggerModule`
+  pattern as `climate:backfill-summary`/`ClimateBackfillModule` — resolves
+  the real `AlexaProactiveEventListener` from a minimal Nest context and
+  calls its real `handleClimateAlert()` directly with a synthetic
+  `ClimateAlertEvent`, so it exercises the actual LWA token fetch and the
+  actual proactive-event POST, not a reimplementation of either. On the
+  VPS: `docker compose exec api npm run alexa:trigger-proactive-event -- cool_down`.
+  Failures are caught and logged by the listener itself, exactly as a real
+  climate-triggered send would be — the script can't tell you whether the
+  send succeeded beyond that log line, by design (it's exercising the real
+  method, which itself never reports success/failure to its caller).
 
 ## Database
 

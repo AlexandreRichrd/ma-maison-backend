@@ -90,9 +90,10 @@ export class ClimateAlertTriggerService {
       outdoorSamples.reduce((sum, sample) => sum + Number(sample.value), 0) /
       outdoorSamples.length;
 
+    const now = new Date();
     const result = evaluateClimateAlert(
       this.state,
-      { indoorTemp, outdoorTemp, now: new Date() },
+      { indoorTemp, outdoorTemp, now },
       climateAlertConfig(effective),
     );
     this.state = result.state;
@@ -103,7 +104,7 @@ export class ClimateAlertTriggerService {
       );
       this.events.emit(
         'climate.alert.triggered',
-        new ClimateAlertEvent(result.fire, indoorTemp, outdoorTemp),
+        new ClimateAlertEvent(result.fire, indoorTemp, outdoorTemp, now),
       );
     }
   }

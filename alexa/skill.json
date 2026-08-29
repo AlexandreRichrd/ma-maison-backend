@@ -20,10 +20,23 @@
     "apis": {
       "custom": {
         "endpoint": {
-          "uri": "https://<DOMAIN>/api/alexa"
+          "uri": "https://<DOMAIN>/api/alexa",
+          "sslCertificateType": "Trusted"
         },
         "interfaces": []
       }
+    },
+    "permissions": [
+      {
+        "name": "alexa::devices:all:notifications:write"
+      }
+    ],
+    "events": {
+      "publications": [
+        {
+          "eventName": "AMAZON.MessageAlert.Activated"
+        }
+      ]
     },
     "manifestVersion": "1.0"
   }
