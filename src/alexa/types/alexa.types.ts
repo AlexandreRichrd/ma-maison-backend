@@ -4,7 +4,8 @@
 // section for why: one small endpoint, not the full SDK/response-builder
 // framework).
 
-export type AlexaRequest = LaunchRequest | IntentRequest | SessionEndedRequest;
+export type AlexaRequest =
+  LaunchRequest | IntentRequest | SessionEndedRequest | SkillEventRequest;
 
 export type LaunchRequest = {
   type: 'LaunchRequest';
@@ -31,6 +32,20 @@ export type SessionEndedRequest = {
   timestamp: string;
   locale: string;
   reason: string;
+};
+
+// Machine-to-machine skill events (SkillEnabled, SkillPermissionAccepted,
+// ProactiveSubscriptionChanged, etc. — see CLAUDE.md's Alexa section) all
+// share the `AlexaSkillEvent.<Name>` type prefix and have no `locale`, no
+// `intent`, and no session concept the way user-initiated requests do.
+// These started arriving once #14's manifest declared `events.endpoint`.
+// Only the discriminant is modeled — the event-specific `body` (e.g.
+// ProactiveSubscriptionChanged's subscriptions array) is never read, since
+// #13 already decided not to track subscription state.
+export type SkillEventRequest = {
+  type: `AlexaSkillEvent.${string}`;
+  requestId: string;
+  timestamp: string;
 };
 
 export type RequestEnvelope = {

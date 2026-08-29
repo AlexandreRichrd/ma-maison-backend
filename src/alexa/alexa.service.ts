@@ -3,7 +3,12 @@ import { Injectable } from '@nestjs/common';
 import { ClimateService } from '../climate/climate.service';
 import { buildEmptyResponse, buildSpeechResponse } from './alexa-response.util';
 import { buildCurrentConditionsSpeech } from './current-conditions';
-import type { RequestEnvelope, ResponseEnvelope } from './types/alexa.types';
+import type {
+  AlexaRequest,
+  RequestEnvelope,
+  ResponseEnvelope,
+  SkillEventRequest,
+} from './types/alexa.types';
 
 const HELP_TEXT =
   'Vous pouvez demander les conditions actuelles, par exemple en disant : quelles sont les conditions.';
@@ -17,6 +22,16 @@ export class AlexaService {
 
   async handleRequest(envelope: RequestEnvelope): Promise<ResponseEnvelope> {
     const { request } = envelope;
+
+    if (isSkillEventRequest(request)) {
+      // Machine-to-machine (SkillEnabled, ProactiveSubscriptionChanged,
+      // etc.) — these started arriving once #14's manifest declared
+      // events.endpoint. Never gets a spoken response, same as
+      // SessionEndedRequest: responding with French speech to a request
+      // nothing is listening to would be wrong, not just unhelpful. No
+      // subscription state read or stored — see CLAUDE.md's Alexa section.
+      return buildEmptyResponse();
+    }
 
     switch (request.type) {
       case 'LaunchRequest':
@@ -60,4 +75,10 @@ export class AlexaService {
     const speech = buildCurrentConditionsSpeech(readings);
     return buildSpeechResponse(speech, { endSession: true });
   }
+}
+
+function isSkillEventRequest(
+  request: AlexaRequest,
+): request is SkillEventRequest {
+  return request.type.startsWith('AlexaSkillEvent.');
 }

@@ -90,4 +90,25 @@ describe('Alexa inbound endpoint (e2e)', () => {
       response: { shouldEndSession: true },
     });
   });
+
+  // Full-stack coverage for the fix in this PR: #14's manifest now
+  // declares events.endpoint, so Amazon sends skill events (e.g.
+  // SKILL_PROACTIVE_SUBSCRIPTION_CHANGED) to this same route for real —
+  // see CLAUDE.md's Alexa section. AlexaSignatureGuard is overridden here
+  // like every other test in this file, so this only exercises the
+  // controller/service handling of the envelope shape, same scope as the
+  // other tests above.
+  it('returns an empty response for a skill event, no speech', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/alexa')
+      .send({
+        request: { type: 'AlexaSkillEvent.ProactiveSubscriptionChanged' },
+      })
+      .expect(200);
+
+    expect(res.body as ResponseEnvelope).toEqual({
+      version: '1.0',
+      response: { shouldEndSession: true },
+    });
+  });
 });

@@ -130,4 +130,37 @@ describe('AlexaSignatureGuard', () => {
       JSON.stringify(VALID_BODY),
     );
   });
+
+  // #14's manifest now declares events.endpoint (see CLAUDE.md's Alexa
+  // section), so skill events (AlexaSkillEvent.*) arrive at this same
+  // endpoint with a different `request` shape than LaunchRequest/
+  // IntentRequest — checked here rather than assumed: applicationId lives
+  // at the same context.System.application.applicationId path regardless
+  // of what `request` contains, so this guard needed no change. If that
+  // ever stopped being true, every skill event would 401 with nobody
+  // talking to the Echo to notice.
+  it('accepts a skill-event envelope the same way as any other request shape', async () => {
+    mockVerify.mockResolvedValue(undefined);
+    const skillEventBody = {
+      context: {
+        System: { application: { applicationId: 'amzn1.ask.skill.expected' } },
+      },
+      request: {
+        type: 'AlexaSkillEvent.ProactiveSubscriptionChanged',
+        requestId: 'req-1',
+        timestamp: '2026-08-29T10:00:00Z',
+      },
+    };
+
+    await expect(
+      guard.canActivate(
+        contextFor(
+          requestWith({
+            rawBody: Buffer.from(JSON.stringify(skillEventBody)),
+            body: skillEventBody,
+          }),
+        ),
+      ),
+    ).resolves.toBe(true);
+  });
 });

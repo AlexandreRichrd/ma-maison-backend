@@ -682,6 +682,34 @@ done yet.
     file is pushed via SMAPI for real, a missing required field could fail
     that push outright, so it's fixed here rather than left as a landmine.
 
+### Skill events (issue #14's manifest fix)
+
+Declaring `events.endpoint` means Amazon now sends skill events — notably
+`SKILL_PROACTIVE_SUBSCRIPTION_CHANGED` — to the same `POST /alexa` as every
+other request. `AlexaSignatureGuard` accepts these like any other signed
+request (`applicationId` lives at the same `context.System.application.applicationId`
+path regardless of request type, so no guard change was needed here — this
+was checked, not assumed, given how easy it is for an envelope shape to
+differ in exactly the field a guard reads). Before this fix,
+`AlexaService.handleRequest()`'s dispatch switch had no case for a skill
+event's `request.type` (`AlexaSkillEvent.*`) — **not** a fall-through to
+the French "not understood" fallback (that only exists inside the
+intent-name switch, one level down), but an unhandled case falling out of
+the outer switch entirely, silently resolving to `undefined` instead of a
+real `ResponseEnvelope`. It happened to typecheck only because the
+declared `AlexaRequest` union was narrower than what Amazon can actually
+send — with no DTO validation on this route (a deliberate choice, see
+above), that narrowness was never actually enforced at runtime.
+`handleRequest()` now recognizes a skill-event envelope explicitly (an
+`isSkillEventRequest()` type guard checking the `AlexaSkillEvent.` prefix)
+and answers with an empty `200`, no speech — the same shape
+`SessionEndedRequest` already gets. No subscription state is tracked or
+persisted: #14 uses `BROADCAST`/`Multicast` events with no `userId`
+targeting, so there's nothing to key a stored subscription against, and
+#13's deferral of `SKILL_PROACTIVE_SUBSCRIPTION_CHANGED` handling still
+stands — this only makes the request a recognized, correctly-answered
+case instead of an unrecognized one.
+
 ### Outbound: proactive events (issue #14)
 
 `AlexaProactiveEventListener` is the Alexa channel for
