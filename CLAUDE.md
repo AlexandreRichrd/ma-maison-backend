@@ -631,43 +631,56 @@ done yet.
     (interactive; logs in with the household's Amazon developer account —
     AWS credential linking, which that command also offers, isn't needed
     since this skill has no Lambda function to deploy).
-  - Push the manifest to the existing skill
-    (`amzn1.ask.skill.11dd43e1-1632-4292-a360-51375b4c60d5`) after editing
-    `alexa/skill.json`:
-    ```
+  - **`skill.json`'s endpoint URIs are a `<DOMAIN>` placeholder, and must
+    stay that way in git** — the real domain isn't committed here. Don't
+    edit the file in place to substitute it (editing it, pushing, then
+    having to remember to revert before the next commit is exactly how a
+    real domain almost got committed while first pushing this manifest).
+    Instead substitute into a throwaway copy and point `--manifest` at
+    that:
+    ```bash
+    sed 's|<DOMAIN>|hearth.aureus-lab.fr|' alexa/skill.json > /tmp/skill-manifest.json
     ask smapi update-skill-manifest \
       -s amzn1.ask.skill.11dd43e1-1632-4292-a360-51375b4c60d5 \
       -g development \
-      --manifest "file:alexa/skill.json"
+      --manifest "file:/tmp/skill-manifest.json"
+    rm /tmp/skill-manifest.json
     ```
-    Run this manually, from `my-home-backend/`, after replacing
-    `skill.json`'s `<DOMAIN>` placeholder with the real deployed domain —
-    not part of any deploy script. Not run by this session; treat any
-    validation error it reports as authoritative over this doc.
+    Run this manually, from `my-home-backend/`, not part of any deploy
+    script. Not run by this session; treat any validation error it reports
+    as authoritative over this doc — as happened with `events.endpoint`
+    below.
   - `skill.json`'s `manifest.permissions` declares
     `alexa::devices:all:notifications:write` and `manifest.events.publications`
     declares `AMAZON.MessageAlert.Activated` — required for #14's outbound
     proactive events to be accepted at all; without them, every
     `AlexaProactiveEventListener` POST is rejected regardless of how
-    correct the request body is. Deliberately **no** `events.subscriptions`
-    or `events.endpoint` entry: those exist for `SKILL_PROACTIVE_SUBSCRIPTION_CHANGED`,
-    which #13 already decided to defer (see above), so there's nothing at
-    `POST /alexa` that would meaningfully act on it yet — no reason to
-    declare a subscription before there's a real handler for it. Amazon's
-    own manifest schema docs don't clearly state whether `events.endpoint`
-    is required once `events` exists at all even with only `publications`
-    declared (undocumented as far as this session could confirm) — if the
-    ASK CLI push rejects the manifest for a missing `events.endpoint`, add
-    one pointing at the same URI as `apis.custom.endpoint` (same
-    `sslCertificateType`), not a new endpoint.
-  - While adding these, found `apis.custom.endpoint` was missing
-    `sslCertificateType: "Trusted"` — required on every HTTPS (non-Lambda)
-    endpoint declaration in the manifest schema, not specific to proactive
-    events. This was presumably tolerated so far because the skill was
-    likely configured through the console UI directly rather than by
-    pushing this file; now that this file is being pushed via SMAPI for
-    real, a missing required field could fail that push outright, so it's
-    fixed here rather than left as a landmine for the first real push.
+    correct the request body is.
+  - **`events.endpoint` is required whenever `events` exists at all**, even
+    with only `publications` declared and no `subscriptions` — confirmed
+    the hard way: the first real push of this manifest failed with
+    `MISSING_REQUIRED_PROPERTY` on `$.manifest.events`, naming `endpoint`
+    specifically (and nothing else — `regions`/`subscriptions` are still
+    genuinely optional, per that same error only ever naming one missing
+    property). `events.endpoint` now mirrors `apis.custom.endpoint`
+    exactly (same URI, same `sslCertificateType`) — Amazon calls this
+    endpoint for skill events the way it calls `apis.custom.endpoint` for
+    intents, and #14 has no separate infrastructure for skill events, so
+    it's the same `POST /alexa` either way (see Skill events below for how
+    that's handled). Still deliberately **no** `events.subscriptions`
+    entry: that's what would make `SKILL_PROACTIVE_SUBSCRIPTION_CHANGED`
+    actually arrive with real subscription-state content, and #13 already
+    decided to defer handling that — declaring `endpoint` alone doesn't
+    subscribe to anything by itself, per Amazon's schema (`subscriptions`
+    is what opts in to specific event types).
+  - While first adding `permissions`/`events`, also found
+    `apis.custom.endpoint` was missing `sslCertificateType: "Trusted"` —
+    required on every HTTPS (non-Lambda) endpoint declaration in the
+    manifest schema, not specific to proactive events. This was presumably
+    tolerated so far because the skill was likely configured through the
+    console UI directly rather than by pushing this file; now that this
+    file is pushed via SMAPI for real, a missing required field could fail
+    that push outright, so it's fixed here rather than left as a landmine.
 
 ### Outbound: proactive events (issue #14)
 
