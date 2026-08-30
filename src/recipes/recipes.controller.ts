@@ -8,10 +8,12 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 
 import { ApiError } from '../common/api-error';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
+import { GetRecipeDetailQueryDto } from './dto/get-recipe-detail-query.dto';
 import { UpdateRecipeDto } from './dto/update-recipe.dto';
 import { RecipesService } from './recipes.service';
 
@@ -25,8 +27,11 @@ export class RecipesController {
   }
 
   @Get('recipes/:id')
-  async detail(@Param('id', ParseUUIDPipe) id: string) {
-    const detail = await this.recipes.detail(id);
+  async detail(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: GetRecipeDetailQueryDto,
+  ) {
+    const detail = await this.recipes.detail(id, query.servings);
     if (!detail) {
       throw new ApiError(404, 'id', 'not_found');
     }
