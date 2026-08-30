@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { IngredientsService } from '../recipes/ingredients.service';
+import { scaleQuantity } from '../recipes/quantity-scaling';
 import { ApiError } from '../common/api-error';
 import { PrismaService } from '../prisma/prisma.service';
 import { Unit } from '@prisma/client';
@@ -97,6 +98,11 @@ export class ShoppingService {
    * by summing quantities atomically (Prisma's Decimal `increment`, no JS
    * float math); a checked row is left alone and a new row is created
    * instead. Every inserted row is tagged with `sourceRecipeId`.
+   *
+   * `dto.servings`, when given and different from the recipe's own
+   * `servings`, scales each ingredient's quantity (via quantity-scaling.ts)
+   * before it's merged/inserted — so a recipe viewed scaled to N servings
+   * sends N-servings quantities to the list, not the recipe's stored ones.
    */
   async addIngredientsToList(
     dto: AddIngredientsDto,
@@ -128,6 +134,13 @@ export class ShoppingService {
         orderBy: { position: 'asc' },
       });
 
+      const recipe = dto.servings
+        ? await tx.recipe.findUnique({
+            where: { id: dto.recipeId },
+            select: { servings: true },
+          })
+        : null;
+
       const unchecked = await tx.shoppingItem.findMany({
         where: { listId, checked: false },
       });
@@ -136,6 +149,16 @@ export class ShoppingService {
       let merged = 0;
 
       for (const ingredient of recipeIngredients) {
+        const quantity =
+          dto.servings && recipe
+            ? scaleQuantity(
+                ingredient.quantity,
+                ingredient.unit,
+                recipe.servings,
+                dto.servings,
+              )
+            : ingredient.quantity;
+
         const normalisedName = this.ingredients.normaliseIngredientName(
           ingredient.name,
         );
@@ -149,7 +172,7 @@ export class ShoppingService {
           await tx.shoppingItem.update({
             where: { id: match.id },
             data: {
-              quantity: { increment: ingredient.quantity },
+              quantity: { increment: quantity },
               updatedAt: new Date(),
             },
           });
@@ -159,7 +182,7 @@ export class ShoppingService {
             data: {
               listId,
               name: ingredient.name,
-              quantity: ingredient.quantity,
+              quantity,
               unit: ingredient.unit,
               sourceRecipeId: dto.recipeId,
             },

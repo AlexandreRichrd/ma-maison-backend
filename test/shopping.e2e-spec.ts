@@ -181,4 +181,31 @@ describe('Shopping (e2e)', () => {
     expect(body.added).toBe(2);
     expect(body.merged).toBe(0);
   });
+
+  it('scales ingredient quantities via servings before adding them', async () => {
+    const recipe = await prisma.recipe.create({
+      data: { name: 'Soup', servings: 4 },
+    });
+    await prisma.recipeIngredient.create({
+      data: {
+        recipeId: recipe.id,
+        position: 0,
+        name: 'Broth',
+        quantity: '250',
+        unit: 'ML',
+      },
+    });
+
+    const res = await request(app.getHttpServer())
+      .post('/shopping-lists/add-ingredients')
+      .set(authed())
+      .send({ recipeId: recipe.id, newListName: 'Soup night', servings: 3 })
+      .expect(201);
+
+    const body = res.body as AddIngredientsBody;
+    const items = await prisma.shoppingItem.findMany({
+      where: { listId: body.listId },
+    });
+    expect(items[0]?.quantity.toString()).toBe('187.5');
+  });
 });

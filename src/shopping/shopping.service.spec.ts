@@ -253,6 +253,74 @@ describe('ShoppingService', () => {
       expect(allItems).toHaveLength(1);
     });
 
+    it('scales quantities to the given servings before inserting (new-list path)', async () => {
+      const recipe = await seedRecipe([
+        { name: 'Broth', quantity: '250', unit: 'ML' },
+      ]);
+
+      const result = await shopping.addIngredientsToList({
+        recipeId: recipe.id,
+        newListName: 'Soup night',
+        servings: 3,
+      });
+
+      const items = await prisma.shoppingItem.findMany({
+        where: { listId: result.listId },
+      });
+      expect(items[0]?.quantity.toString()).toBe('187.5');
+    });
+
+    it('leaves quantities as stored when servings is omitted', async () => {
+      const recipe = await seedRecipe([
+        { name: 'Broth', quantity: '250', unit: 'ML' },
+      ]);
+
+      const result = await shopping.addIngredientsToList({
+        recipeId: recipe.id,
+        newListName: 'Soup night',
+      });
+
+      const items = await prisma.shoppingItem.findMany({
+        where: { listId: result.listId },
+      });
+      expect(items[0]?.quantity.toString()).toBe('250');
+    });
+
+    it('sums correctly when two recipes contribute the same ingredient at different serving multipliers', async () => {
+      const recipeA = await seedRecipe([
+        { name: 'Broth', quantity: '250', unit: 'ML' },
+      ]); // servings: 4 (seedRecipe's fixed value)
+      const recipeB = await prisma.recipe.create({
+        data: { name: 'Stew', servings: 2 },
+      });
+      await prisma.recipeIngredient.create({
+        data: {
+          recipeId: recipeB.id,
+          position: 0,
+          name: 'broth',
+          quantity: '100',
+          unit: 'ML',
+        },
+      });
+
+      const first = await shopping.addIngredientsToList({
+        recipeId: recipeA.id,
+        newListName: 'Meal plan',
+        servings: 8, // 250 * 8/4 = 500
+      });
+      await shopping.addIngredientsToList({
+        recipeId: recipeB.id,
+        listId: first.listId,
+        servings: 4, // 100 * 4/2 = 200
+      });
+
+      const items = await prisma.shoppingItem.findMany({
+        where: { listId: first.listId },
+      });
+      expect(items).toHaveLength(1);
+      expect(items[0]?.quantity.toString()).toBe('700');
+    });
+
     it('does not merge into a checked row — creates a new row instead', async () => {
       const recipe = await seedRecipe([
         { name: 'Carrot', quantity: '2', unit: 'KG' },
