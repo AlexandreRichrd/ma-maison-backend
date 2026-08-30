@@ -60,7 +60,6 @@ export class AlexaProactiveEventListener {
     try {
       const accessToken = await this.lwaToken.getAccessToken();
       await this.sendProactiveEvent(accessToken, event);
-      this.logger.log(`sent Alexa proactive event (${event.direction})`);
     } catch (error) {
       this.logger.error('failed to send Alexa proactive event', error);
     }
@@ -84,6 +83,7 @@ export class AlexaProactiveEventListener {
       localizedAttributes: [{ locale: SKILL_LOCALE }],
       relevantAudience: { type: 'Multicast', payload: {} },
     };
+    const requestBody = JSON.stringify(body);
 
     const response = await fetch(PROACTIVE_EVENTS_URL, {
       method: 'POST',
@@ -91,13 +91,35 @@ export class AlexaProactiveEventListener {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(body),
+      body: requestBody,
     });
 
+    const responseBody = await response.text().catch(() => '');
+    const responseHeaders = Object.fromEntries(response.headers.entries());
+    const statusNote =
+      response.status === 202
+        ? '202 accepted for processing — not a delivery confirmation'
+        : `responded ${response.status}`;
+
+    // Permanent, not scaffolding — see CLAUDE.md's Alexa section. This API
+    // has no delivery-confirmation signal at all (no webhook, no polling
+    // endpoint): a 202 means Amazon accepted the event for async
+    // processing, nothing more. It can still be discarded downstream with
+    // no further signal to us, so "sent" was misleading — logged here
+    // whether or not the POST ultimately succeeds, since diagnosing a
+    // silent non-delivery needs the exact request Amazon received compared
+    // against its reference, not just a pass/fail boolean. No secrets:
+    // the access token lives only in the Authorization header, which is
+    // never included here.
+    this.logger.log(
+      `Alexa proactive event ${statusNote} — url=${PROACTIVE_EVENTS_URL} ` +
+        `request=${requestBody} responseHeaders=${JSON.stringify(responseHeaders)} ` +
+        `responseBody=${responseBody}`,
+    );
+
     if (!response.ok) {
-      const text = await response.text().catch(() => '');
       throw new Error(
-        `proactive event POST failed: ${response.status} ${text}`,
+        `proactive event POST failed: ${response.status} ${responseBody}`,
       );
     }
   }

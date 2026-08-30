@@ -773,21 +773,57 @@ whether this channel succeeds, same requirement that already shapes
   enough to notice the yellow ring, short enough that a stale "open the
   windows now" alert doesn't sit in the queue overnight, per the issue's
   own framing.
-- **Open risk, not resolved**: whether Amazon actually has a French
-  rendering of the `AMAZON.MessageAlert.Activated` notification template
-  is **not confirmed**. `localizedAttributes: [{ locale: 'fr-FR' }]` is
-  correctly shaped per the docs (a required top-level field on every
-  proactive event request, regardless of event type — this event's own
-  payload has no locale-specific strings of its own to localize), but
-  Amazon's documentation doesn't state which locales each proactive event
-  *type* has a rendering for, and this could not be confirmed by reading
-  further docs. If `fr-FR` turns out unsupported for this event type, the
-  most likely failure mode is the API still accepting the request (locale
-  support is a rendering-side concern, not necessarily a request
-  validation one) while the household's Echo never actually announces
-  anything — the ring may still go yellow (a device-level indicator) even
-  if the spoken/notification text doesn't render. Only a live device test
-  can settle this; do not assume either outcome.
+- **A 202 response is not evidence of delivery — confirmed against
+  Amazon's own reference, not assumed.** The Proactive Events API
+  reference states 202 means "Alexa created the event successfully" —
+  accepted for further, asynchronous processing, nothing more. There is no
+  webhook, no polling endpoint, no signal of any kind back to this API
+  once Amazon returns 202: the event can still be silently discarded
+  downstream (bad locale, no eligible device, whatever) with zero
+  indication to the sender. A real send attempt (via the trigger script
+  below) got 202 for both `cool_down` and `close_up`, with the manifest
+  correctly configured and notifications enabled in the Alexa app, yet
+  produced no yellow ring and no entry in the Alexa app's notification
+  feed — fully consistent with "accepted, discarded downstream" and not
+  distinguishable from it using only the HTTP response. `sendProactiveEvent()`
+  logs a permanent diagnostic line for exactly this reason: the accurate
+  status note (202 explicitly flagged as non-confirmatory, vs. any other
+  status logged plainly), the full request body actually sent, the full
+  response body, and the response headers — logged whether or not the POST
+  ultimately succeeds, since diagnosing a silent non-delivery needs the
+  exact bytes Amazon received compared against its reference by hand, not
+  a pass/fail boolean. Never logs the access token or client secret.
+- **Checked against Amazon's `AMAZON.MessageAlert.Activated` reference
+  field-by-field — no discrepancy found in the payload shape itself**:
+  `state.status` (required, `UNREAD`/`FLAGGED`) and `messageGroup.creator.name`/
+  `messageGroup.count` (both required) are all present and valid;
+  `state.freshness` is optional and set anyway (`NEW`); there is no
+  documented `urgency` field for this event type, so there's nothing
+  missing there. `relevantAudience: { type: 'Multicast', payload: {} }`
+  matches Amazon's own documented example for a broadcast audience
+  verbatim.
+- **Open risk, still not resolved — this is the leading suspect**: whether
+  Amazon actually has a French rendering of the `AMAZON.MessageAlert.Activated`
+  notification template. Checked directly against the event-type reference,
+  not inferred: Amazon explicitly documents `AMAZON.WeatherAlert.Activated`
+  as `en-US`-only, with equivalent locale restrictions called out for a
+  couple of other event types — and states **no such restriction** for
+  `AMAZON.MessageAlert.Activated`. That absence is weak evidence *for*
+  broader locale support, not confirmation of `fr-FR` specifically; the
+  docs simply don't enumerate which locales this event type is rendered
+  in, one way or the other. `localizedAttributes: [{ locale: 'fr-FR' }]`
+  is structurally correct regardless (a required top-level field on every
+  proactive event request; this event's own payload defines no
+  `localizedattribute:`-style placeholder fields to fill in, so `locale`
+  alone is the complete, correct shape for this event type specifically —
+  not a shortcut). If `fr-FR` has no template for this event type, the
+  most likely failure mode is exactly what was observed: the API still
+  returns 202 (locale support is a rendering-side concern downstream of
+  acceptance, not a request-validation one), while nothing ever reaches
+  the device. Nothing in this codebase can distinguish that from other
+  silent-discard causes without a live device test on a different locale,
+  which hasn't been done and isn't planned — noting the risk plainly
+  rather than guessing at it further.
 - No new HTTP client dependency for any of this — Node 20's global `fetch`
   is enough, avoiding another dependency-approval round like
   `alexa-verifier`'s.
