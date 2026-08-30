@@ -943,6 +943,43 @@ not acceptable:
 Name normalisation (trim, lowercase, collapse whitespace) lives in
 `src/recipes/ingredients.ts` and is unit-tested. Do not inline it.
 
+### Servings scaling (issue #16)
+
+`GET /recipes/:id?servings=N` scales returned ingredient quantities from the
+recipe's own `servings` to `N` — display/export only, never touching
+`recipes.servings` or the stored `recipe_ingredients` rows. `POST
+/shopping-lists/add-ingredients` accepts the same optional `servings` field;
+when given, it's what gets merged/inserted (via the existing `increment`
+path above), not the recipe's stored quantities — so a recipe viewed scaled
+to N servings sends N-servings quantities to the shopping list. Both go
+through one shared function, `src/recipes/quantity-scaling.ts`'s
+`scaleQuantity()`, using `Prisma.Decimal` throughout (never `parseFloat`/JS
+floats, matching Quantities under Conventions) — a single implementation so
+the two paths can never drift apart, which is what makes the summed-total
+case below correct.
+
+Two design calls, made deliberately rather than left to default:
+
+- **Rounding differs by unit.** *Countable* units (`GOUSSE`, `TRANCHE`,
+  `SACHET`, `PAQUET`, `BOITE`, `POT`, `BOUTEILLE`, `TETE`, `DOUZAINE`,
+  `MICHE`, `UNITE`) round to the nearest whole number (half-up), floored at
+  1 whenever the original quantity was `> 0` — never "0 gousses" for a
+  scaled-down recipe. *Continuous* units (`G`, `KG`, `ML`, `L`,
+  `CUILLERE_A_CAFE`, `CUILLERE_A_SOUPE`, `PINCEE`) round to 2 decimal
+  places. Nearest-rounding rather than always-round-up, since rounding up
+  systematically biases every scale-up too generous and every scale-down
+  too stingy, compounding across many ingredients.
+- **No per-ingredient "don't scale" flag.** Every ingredient scales
+  proportionally, salt/pepper included — same as Marmiton. A flag is
+  schema + UI surface (a migration, a form field, an extra branch in
+  `scaleQuantity`/the merge loop) for a benefit a cook can just as easily
+  judge by eye; not worth it here.
+
+Because `addIngredientsToList()` scales *before* the merge/increment step,
+two recipes contributing the same ingredient at different serving
+multipliers still sum to one correct total on the list — covered by
+`shopping.service.spec.ts`.
+
 ## Authentication
 
 JWT bearer tokens, not server-side sessions — this API is stateless and
@@ -1221,7 +1258,6 @@ Do not build these unless explicitly asked:
 - Redesigning chore rotation or reminder assignees for more than two people
   — invites can technically create a third+ user today, but nothing
   downstream handles it (see Chore rotation)
-- Servings scaling of ingredient quantities
 - Store tags on shopping items
 - Push or in-app notifications (transactional invite/activation/password-reset
   email is the only mail this API sends)
