@@ -7,8 +7,8 @@
           "summary": "Relevé de température et d'humidité de la maison.",
           "description": "Skill privée pour un seul foyer : donne la température et l'humidité intérieure/extérieure actuelles. Non publiée, non certifiée — usage développement uniquement.",
           "examplePhrases": [
-            "Alexa, ouvre eurse",
-            "Alexa, demande à eurse quelles sont les conditions"
+            "Alexa, ouvre la maison",
+            "Alexa, demande à la maison quelles sont les conditions"
           ]
         }
       },
@@ -32,6 +32,10 @@
       }
     ],
     "events": {
+      "endpoint": {
+        "uri": "https://<DOMAIN>/api/alexa",
+        "sslCertificateType": "Trusted"
+      },
       "publications": [
         {
           "eventName": "AMAZON.MessageAlert.Activated"
