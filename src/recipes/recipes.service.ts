@@ -5,6 +5,7 @@ import { ApiError } from '../common/api-error';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
 import { UpdateRecipeDto } from './dto/update-recipe.dto';
+import { scaleQuantity } from './quantity-scaling';
 
 export type RecipePreview = Recipe & { ingredientCount: number };
 
@@ -31,13 +32,22 @@ export class RecipesService {
     }));
   }
 
-  async detail(id: string): Promise<RecipeDetail | null> {
+  async detail(id: string, targetServings?: number): Promise<RecipeDetail | null> {
     const recipe = await this.prisma.recipe.findUnique({ where: { id } });
     if (!recipe) return null;
-    return this.loadDetail(recipe);
+    return this.loadDetail(recipe, targetServings);
   }
 
-  private async loadDetail(recipe: Recipe): Promise<RecipeDetail> {
+  /**
+   * `targetServings`, when given and different from the recipe's own
+   * `servings`, scales the returned ingredient quantities (see
+   * quantity-scaling.ts) — the stored recipe and its ingredient rows are
+   * never modified, only what's returned here.
+   */
+  private async loadDetail(
+    recipe: Recipe,
+    targetServings?: number,
+  ): Promise<RecipeDetail> {
     const [ingredients, steps] = await Promise.all([
       this.prisma.recipeIngredient.findMany({
         where: { recipeId: recipe.id },
@@ -48,7 +58,21 @@ export class RecipesService {
         orderBy: { position: 'asc' },
       }),
     ]);
-    return { recipe, ingredients, steps };
+
+    const scaledIngredients =
+      targetServings !== undefined && targetServings !== recipe.servings
+        ? ingredients.map((ingredient) => ({
+            ...ingredient,
+            quantity: scaleQuantity(
+              ingredient.quantity,
+              ingredient.unit,
+              recipe.servings,
+              targetServings,
+            ),
+          }))
+        : ingredients;
+
+    return { recipe, ingredients: scaledIngredients, steps };
   }
 
   async create(dto: CreateRecipeDto): Promise<RecipeDetail> {

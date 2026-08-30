@@ -14,8 +14,8 @@ type ErrorBody = {
 type LoginBody = { accessToken: string };
 type RecipePreviewBody = { id: string; name: string; ingredientCount: number };
 type RecipeDetailBody = {
-  recipe: { id: string; name: string };
-  ingredients: { id: string; name: string }[];
+  recipe: { id: string; name: string; servings: number };
+  ingredients: { id: string; name: string; quantity: string }[];
 };
 
 describe('Recipes (e2e)', () => {
@@ -132,6 +132,54 @@ describe('Recipes (e2e)', () => {
     const body = res.body as RecipeDetailBody;
     expect(body.recipe.id).toBe(recipe.id);
     expect(body.ingredients.map((i) => i.name)).toEqual(['Carrot', 'Onion']);
+  });
+
+  it('scales ingredient quantities via ?servings= without touching the stored recipe', async () => {
+    const recipe = await prisma.recipe.create({
+      data: { name: 'Soup', servings: 4 },
+    });
+    await prisma.recipeIngredient.create({
+      data: {
+        recipeId: recipe.id,
+        position: 0,
+        name: 'Broth',
+        quantity: '250',
+        unit: 'ML',
+      },
+    });
+
+    const res = await request(app.getHttpServer())
+      .get(`/recipes/${recipe.id}`)
+      .query({ servings: 3 })
+      .set(authed())
+      .expect(200);
+
+    const body = res.body as RecipeDetailBody;
+    expect(body.recipe.servings).toBe(4);
+    expect(body.ingredients[0]?.quantity).toBe('187.5');
+
+    const stored = await prisma.recipeIngredient.findUniqueOrThrow({
+      where: { id: body.ingredients[0]!.id },
+    });
+    expect(stored.quantity.toString()).toBe('250');
+  });
+
+  it('rejects an invalid ?servings= value', async () => {
+    const recipe = await prisma.recipe.create({
+      data: { name: 'Soup', servings: 4 },
+    });
+
+    await request(app.getHttpServer())
+      .get(`/recipes/${recipe.id}`)
+      .query({ servings: 0 })
+      .set(authed())
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get(`/recipes/${recipe.id}`)
+      .query({ servings: 'abc' })
+      .set(authed())
+      .expect(400);
   });
 
   it('404s a detail request for an unknown recipe', async () => {

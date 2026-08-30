@@ -100,6 +100,65 @@ describe('RecipesService', () => {
       ]);
       expect(result?.steps.map((s) => s.text)).toEqual(['Chop', 'Simmer']);
     });
+
+    it('scales ingredient quantities to the target servings without touching the stored recipe', async () => {
+      const recipe = await prisma.recipe.create({
+        data: { name: 'Soup', servings: 4 },
+      });
+      await prisma.recipeIngredient.createMany({
+        data: [
+          {
+            recipeId: recipe.id,
+            position: 0,
+            name: 'Carrot',
+            quantity: '2',
+            unit: 'UNITE',
+          },
+          {
+            recipeId: recipe.id,
+            position: 1,
+            name: 'Broth',
+            quantity: '250',
+            unit: 'ML',
+          },
+        ],
+      });
+
+      const result = await recipes.detail(recipe.id, 3);
+
+      expect(result?.recipe.servings).toBe(4);
+      expect(
+        result?.ingredients.find((i) => i.name === 'Carrot')?.quantity.toString(),
+      ).toBe('2');
+      expect(
+        result?.ingredients.find((i) => i.name === 'Broth')?.quantity.toString(),
+      ).toBe('187.5');
+
+      const stored = await prisma.recipeIngredient.findMany({
+        where: { recipeId: recipe.id },
+        orderBy: { position: 'asc' },
+      });
+      expect(stored.map((i) => i.quantity.toString())).toEqual(['2', '250']);
+    });
+
+    it('leaves quantities untouched when the target servings match the recipe', async () => {
+      const recipe = await prisma.recipe.create({
+        data: { name: 'Soup', servings: 4 },
+      });
+      await prisma.recipeIngredient.create({
+        data: {
+          recipeId: recipe.id,
+          position: 0,
+          name: 'Carrot',
+          quantity: '2',
+          unit: 'UNITE',
+        },
+      });
+
+      const result = await recipes.detail(recipe.id, 4);
+
+      expect(result?.ingredients[0]?.quantity.toString()).toBe('2');
+    });
   });
 
   describe('create', () => {
