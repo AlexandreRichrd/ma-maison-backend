@@ -73,7 +73,7 @@ describe('AlexaProactiveEventListener', () => {
         name: 'AMAZON.MessageAlert.Activated',
         payload: {
           state: { status: 'UNREAD', freshness: 'NEW' },
-          messageGroup: { creator: { name: 'Hearth' }, count: 1 },
+          messageGroup: { creator: { name: 'eurse' }, count: 1 },
         },
       },
       localizedAttributes: [{ locale: 'fr-FR' }],

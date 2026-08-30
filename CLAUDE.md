@@ -743,8 +743,11 @@ whether this channel succeeds, same requirement that already shapes
   certification to reach production, so there's no reason to ever move off
   `stages/development`), `Authorization: Bearer <token>`, an
   `AMAZON.MessageAlert.Activated` event (`state: { status: 'UNREAD',
-  freshness: 'NEW' }`, `messageGroup: { creator: { name: 'Hearth' }, count:
-  1 }`), `relevantAudience: { type: 'Multicast', payload: {} }` (this is
+  freshness: 'NEW' }`, `messageGroup: { creator: { name: 'eurse' }, count:
+  1 }` — `NOTIFICATION_CREATOR_NAME` spelled for French pronunciation
+  rather than the skill's actual name, since it's read aloud by whatever
+  fr-FR rendering Amazon has for this event, if any), `relevantAudience: {
+  type: 'Multicast', payload: {} }` (this is
   the actual field name for what the issue calls `BROADCAST` — reaches
   every device with notifications enabled for the skill, no per-user
   targeting), and a required top-level `localizedAttributes: [{ locale:
