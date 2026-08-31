@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -51,6 +52,12 @@ export class ShoppingController {
     @Body() dto: AddShoppingItemDto,
   ) {
     return this.shopping.addItem(listId, dto);
+  }
+
+  @HttpCode(204)
+  @Delete('shopping-lists/:id')
+  remove(@Param('id', ParseUUIDPipe) id: string) {
+    return this.shopping.remove(id);
   }
 
   @HttpCode(200)

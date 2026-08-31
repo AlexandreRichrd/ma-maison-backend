@@ -182,6 +182,75 @@ describe('Shopping (e2e)', () => {
     expect(body.merged).toBe(0);
   });
 
+  describe('DELETE /shopping-lists/:id', () => {
+    it('404s for an unknown list', async () => {
+      const res = await request(app.getHttpServer())
+        .delete('/shopping-lists/00000000-0000-0000-0000-000000000000')
+        .set(authed())
+        .expect(404);
+      expect((res.body as ErrorBody).errors).toEqual([
+        { field: 'id', code: 'not_found' },
+      ]);
+    });
+
+    it('deletes the list and cascades its items', async () => {
+      const list = await prisma.shoppingList.create({
+        data: { name: 'Groceries' },
+      });
+      const item = await prisma.shoppingItem.create({
+        data: {
+          listId: list.id,
+          name: 'Milk',
+          quantity: '1',
+          unit: 'L',
+          checked: false,
+        },
+      });
+
+      await request(app.getHttpServer())
+        .delete(`/shopping-lists/${list.id}`)
+        .set(authed())
+        .expect(204);
+
+      await request(app.getHttpServer())
+        .get(`/shopping-lists/${list.id}`)
+        .set(authed())
+        .expect(404);
+      expect(
+        await prisma.shoppingItem.findUnique({ where: { id: item.id } }),
+      ).toBeNull();
+    });
+
+    it('leaves the recipe a deleted item was sourced from untouched', async () => {
+      const recipe = await prisma.recipe.create({
+        data: { name: 'Soup', servings: 4 },
+      });
+      const list = await prisma.shoppingList.create({
+        data: { name: 'Groceries' },
+      });
+      await prisma.shoppingItem.create({
+        data: {
+          listId: list.id,
+          name: 'Carrot',
+          quantity: '2',
+          unit: 'UNITE',
+          checked: false,
+          sourceRecipeId: recipe.id,
+        },
+      });
+
+      await request(app.getHttpServer())
+        .delete(`/shopping-lists/${list.id}`)
+        .set(authed())
+        .expect(204);
+
+      await request(app.getHttpServer())
+        .get(`/recipes/${recipe.id}`)
+        .set(authed())
+        .expect(200);
+    });
+  });
+
   it('scales ingredient quantities via servings before adding them', async () => {
     const recipe = await prisma.recipe.create({
       data: { name: 'Soup', servings: 4 },
