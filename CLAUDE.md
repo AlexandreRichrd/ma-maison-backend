@@ -895,6 +895,16 @@ This is the same schema the old Drizzle setup used — port it into
 - Reminder completion is `done_at` nullable, not a boolean — undo sets it to null
 - `shopping_items.source_recipe_id` is `onDelete: SetNull`: deleting a recipe
   must never remove items already on a list
+- `DELETE /shopping-lists/:id` (issue #17) is a hard delete, not an
+  archive — same call as recipe deletion, and consistent with `chores`
+  deletion also destroying its completion history: nothing else in this app
+  soft-deletes, and a shopping list has no other consumer of its history the
+  way, say, `daily_summaries` does. `shopping_items` cascades with the list
+  (`onDelete: Cascade`, above `shopping_items.source_recipe_id`'s `SetNull`
+  in the direction that matters here: deleting a list's items must never
+  touch the recipe an item was sourced from). No warning distinguishes a
+  list with unchecked items from a fully-checked one — same one-shot
+  confirmation as recipe/chore deletion, not a special case
 - Ingredient count on the recipe overview is an aggregate query
   (`_count`), not a stored counter column
 - `Unit` (`recipe_ingredients.unit`, `shopping_items.unit`) is a real DB
