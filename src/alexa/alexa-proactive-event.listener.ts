@@ -24,6 +24,12 @@ const EXPIRY_MS = 10 * 60_000;
 // see CLAUDE.md's Alexa section for that open risk.
 const SKILL_LOCALE = 'fr-FR';
 
+// messageGroup.creator.name — read aloud as-is by whatever fr-FR rendering
+// (if any) Amazon has for this event, so it's spelled for French
+// pronunciation rather than as the skill's actual name ("Hearth" would be
+// read with an English accent by a French TTS voice).
+const NOTIFICATION_CREATOR_NAME = 'eurse';
+
 type ProactiveEventRequest = {
   timestamp: string;
   referenceId: string;
@@ -77,7 +83,10 @@ export class AlexaProactiveEventListener {
         name: 'AMAZON.MessageAlert.Activated',
         payload: {
           state: { status: 'UNREAD', freshness: 'NEW' },
-          messageGroup: { creator: { name: 'Hearth' }, count: 1 },
+          messageGroup: {
+            creator: { name: NOTIFICATION_CREATOR_NAME },
+            count: 1,
+          },
         },
       },
       localizedAttributes: [{ locale: SKILL_LOCALE }],
