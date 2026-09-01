@@ -77,6 +77,17 @@ export class ShoppingService {
     });
   }
 
+  /** Cascades shopping_items; shopping_items.sourceRecipeId is untouched — SetNull only fires the other way, on recipe delete (see schema.prisma). */
+  async remove(id: string): Promise<void> {
+    const existing = await this.prisma.shoppingList.findUnique({
+      where: { id },
+    });
+    if (!existing) {
+      throw new ApiError(404, 'id', 'not_found');
+    }
+    await this.prisma.shoppingList.delete({ where: { id } });
+  }
+
   async toggleItem(itemId: string): Promise<ShoppingItem> {
     const item = await this.prisma.shoppingItem.findUnique({
       where: { id: itemId },

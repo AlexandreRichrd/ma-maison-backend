@@ -147,6 +147,61 @@ describe('ShoppingService', () => {
     });
   });
 
+  describe('remove', () => {
+    it('rejects an unknown list', async () => {
+      await expect(
+        shopping.remove('00000000-0000-0000-0000-000000000000'),
+      ).rejects.toThrow(ApiError);
+    });
+
+    it('deletes the list and cascades its items', async () => {
+      const list = await prisma.shoppingList.create({
+        data: { name: 'Groceries' },
+      });
+      const item = await prisma.shoppingItem.create({
+        data: {
+          listId: list.id,
+          name: 'Milk',
+          quantity: '1',
+          unit: 'L',
+          checked: false,
+        },
+      });
+
+      await shopping.remove(list.id);
+
+      expect(await shopping.detail(list.id)).toBeNull();
+      expect(await prisma.shoppingItem.count({ where: { id: item.id } })).toBe(
+        0,
+      );
+    });
+
+    it('leaves the source recipe of a recipe-sourced item untouched', async () => {
+      const recipe = await prisma.recipe.create({
+        data: { name: 'Soup', servings: 4 },
+      });
+      const list = await prisma.shoppingList.create({
+        data: { name: 'Groceries' },
+      });
+      await prisma.shoppingItem.create({
+        data: {
+          listId: list.id,
+          name: 'Carrot',
+          quantity: '2',
+          unit: 'UNITE',
+          checked: false,
+          sourceRecipeId: recipe.id,
+        },
+      });
+
+      await shopping.remove(list.id);
+
+      expect(
+        await prisma.recipe.findUnique({ where: { id: recipe.id } }),
+      ).not.toBeNull();
+    });
+  });
+
   describe('addIngredientsToList', () => {
     async function seedRecipe(
       ingredients: { name: string; quantity: string; unit: Unit }[],
